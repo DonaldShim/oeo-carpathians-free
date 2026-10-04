@@ -1,19 +1,121 @@
 {
-  "schema": "OEO_CARPATHIANS_UX3_CONFIG_V1",
-  "release": "UX3-UA-CARPATHIANS",
+  "schema": "OEO_CARPATHIANS_UX4_CONFIG_V1",
+  "release": "UX4-RU-CARPATHIANS",
   "region_label": "Українські Карпати",
   "presets": [
-    {"id":"chornohora","label":"Чорногора / Яремче","bbox":[24.35,48.02,24.90,48.35]},
-    {"id":"borzhava","label":"Боржава","bbox":[23.00,48.40,23.55,48.82]},
-    {"id":"skole","label":"Сколівські Бескиди","bbox":[23.15,48.75,23.85,49.20]},
-    {"id":"rakhiv","label":"Рахів / Мармароси","bbox":[24.00,47.82,24.75,48.32]},
-    {"id":"gorgany","label":"Ґорґани","bbox":[23.65,48.30,24.65,48.90]},
-    {"id":"synevyr","label":"Синевир / Міжгір’я","bbox":[23.45,48.35,23.95,48.80]}
+    {
+      "id": "chornohora",
+      "label": "Чорногора / Яремче",
+      "bbox": [
+        24.35,
+        48.02,
+        24.9,
+        48.35
+      ]
+    },
+    {
+      "id": "borzhava",
+      "label": "Боржава",
+      "bbox": [
+        23,
+        48.4,
+        23.55,
+        48.82
+      ]
+    },
+    {
+      "id": "skole",
+      "label": "Сколівські Бескиди",
+      "bbox": [
+        23.15,
+        48.75,
+        23.85,
+        49.2
+      ]
+    },
+    {
+      "id": "rakhiv",
+      "label": "Рахів / Мармароси",
+      "bbox": [
+        24,
+        47.82,
+        24.75,
+        48.32
+      ]
+    },
+    {
+      "id": "gorgany",
+      "label": "Ґорґани",
+      "bbox": [
+        23.65,
+        48.3,
+        24.65,
+        48.9
+      ]
+    },
+    {
+      "id": "synevyr",
+      "label": "Синевир / Міжгір’я",
+      "bbox": [
+        23.45,
+        48.35,
+        23.95,
+        48.8
+      ]
+    }
   ],
   "scenarios": [
-    {"id":"forest","label":"Ліс / вирубка / вітровал","days":30,"base":"terrain","s2_mode":"NBR","sources":["Sentinel-1","Sentinel-2","NISAR","GFW"]},
-    {"id":"flood","label":"Паводок / вода","days":14,"base":"hybrid","s2_mode":"NDWI","sources":["Sentinel-1","Sentinel-2"]},
-    {"id":"fire","label":"Пожежа / термоаномалія","days":7,"base":"hybrid","s2_mode":"NBR","sources":["FIRMS","Sentinel-2","Sentinel-1"]},
-    {"id":"slope","label":"Зсув / ерозія схилу","days":30,"base":"terrain","s2_mode":"NDMI","sources":["Sentinel-1","NISAR","Sentinel-2"]}
+    {
+      "id": "forest",
+      "label": "Лес / вырубка / ветровал",
+      "days": 30,
+      "base": "terrain",
+      "s2_mode": "NBR",
+      "sources": [
+        "Sentinel-1",
+        "Sentinel-2",
+        "NISAR",
+        "GFW"
+      ],
+      "meaning": "Структурные изменения лесного покрова: SAR работает при облаках, NBR помогает подтвердить повреждение оптически. Это не детектор техники."
+    },
+    {
+      "id": "flood",
+      "label": "Паводок / вода",
+      "days": 14,
+      "base": "hybrid",
+      "s2_mode": "NDWI",
+      "sources": [
+        "Sentinel-1",
+        "Sentinel-2"
+      ],
+      "meaning": "Изменение площади воды и переувлажнение. При сплошной облачности приоритет у Sentinel‑1 SAR; NDWI используется для оптического подтверждения."
+    },
+    {
+      "id": "fire",
+      "label": "Пожар / термоаномалия",
+      "days": 7,
+      "base": "hybrid",
+      "s2_mode": "NBR",
+      "sources": [
+        "FIRMS",
+        "Sentinel-2",
+        "Sentinel-1"
+      ],
+      "meaning": "FIRMS даёт прямой тепловой сигнал, NBR и SAR — подтверждение последствий. Без FIRMS-ключа тепловые точки не подменяются косвенными признаками."
+    },
+    {
+      "id": "slope",
+      "label": "Оползень / эрозия склона",
+      "days": 30,
+      "base": "terrain",
+      "s2_mode": "NDMI",
+      "sources": [
+        "Sentinel-1",
+        "NISAR",
+        "Sentinel-2"
+      ],
+      "meaning": "Поиск структурных изменений склонов и влажности. Это скрининг изменений, а не геологическое заключение."
+    }
   ]
 }
