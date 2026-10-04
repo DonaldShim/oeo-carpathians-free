@@ -19,7 +19,7 @@ STATIC = ROOT / 'static'
 CFG = json.loads((ROOT / 'CARPATHIANS_CONFIG.json').read_text(encoding='utf-8'))
 EARTH_SEARCH = 'https://earth-search.aws.element84.com/v1'
 
-app = FastAPI(title='OEO Карпати · Полісся 3.1 Free', version='3.3.0-free')
+app = FastAPI(title='OEO Карпати · Полісся 3.1 Free', version='4.1.0-free')
 app.mount('/static', StaticFiles(directory=STATIC), name='static')
 
 @app.get('/')
@@ -29,11 +29,11 @@ async def root():
 @app.get('/health')
 async def health():
     return {
-        'monitor':'ok', 'version':'3.3.0-free', 'profile':'render-free',
+        'monitor':'ok', 'version':'4.1.0-free', 'profile':'render-free',
         'region':'Українські Карпати + Полісся', 'stac':True,
         'sentinel1':True, 'sentinel2':True, 'nisar':True,
         'firms_configured': bool(os.getenv('FIRMS_MAP_KEY')),
-        'gfw_mode':'external-evidence'
+        'gfw_mode':'external-evidence','event_engine':'sentinel2-temporal-candidates-v41'
     }
 
 @app.get('/api/config')
