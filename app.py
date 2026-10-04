@@ -19,7 +19,7 @@ STATIC = ROOT / 'static'
 CFG = json.loads((ROOT / 'CARPATHIANS_CONFIG.json').read_text(encoding='utf-8'))
 EARTH_SEARCH = 'https://earth-search.aws.element84.com/v1'
 
-app = FastAPI(title='OEO Карпати · Полісся 3.1 Free', version='3.2.0-free')
+app = FastAPI(title='OEO Карпати · Полісся 3.1 Free', version='3.3.0-free')
 app.mount('/static', StaticFiles(directory=STATIC), name='static')
 
 @app.get('/')
@@ -29,7 +29,7 @@ async def root():
 @app.get('/health')
 async def health():
     return {
-        'monitor':'ok', 'version':'3.2.0-free', 'profile':'render-free',
+        'monitor':'ok', 'version':'3.3.0-free', 'profile':'render-free',
         'region':'Українські Карпати + Полісся', 'stac':True,
         'sentinel1':True, 'sentinel2':True, 'nisar':True,
         'firms_configured': bool(os.getenv('FIRMS_MAP_KEY')),
@@ -202,6 +202,180 @@ async def activity_scan(bbox:str,days:int=30):
       'summary':{'sentinel1':len(s1),'sentinel2':len(s2),'nisar':nisar_data.get('count',0),'firms':firms_data.get('count',0)},
       'latest':{'sentinel1':s1[:5],'sentinel2':s2[:5],'nisar':nisar_data.get('results',[])[:5],'firms':firms_data.get('features',[])[:10]},
       'interpretation':'Свіжі дані знайдені. NO_CONFIRMED_EVENT означає, що сам факт нових сцен не є підтвердженим природним або антропогенним событием.'
+    }
+
+
+# OEO_EVENT_CANDIDATES_V41
+def _dt(v):
+    if not v:
+        return None
+    try:
+        return datetime.fromisoformat(v.replace("Z","+00:00"))
+    except Exception:
+        return None
+
+def _lonlat_tile(lon: float, lat: float, z: int):
+    import math
+    n=2**z
+    x=int((lon+180.0)/360.0*n)
+    lat=max(min(lat,85.05112878),-85.05112878)
+    y=int((1.0-math.asinh(math.tan(math.radians(lat)))/math.pi)/2.0*n)
+    return x,y
+
+def _tile_bounds(x: int, y: int, z: int):
+    import math
+    n=2**z
+    west=x/n*360.0-180.0
+    east=(x+1)/n*360.0-180.0
+    north=math.degrees(math.atan(math.sinh(math.pi*(1-2*y/n))))
+    south=math.degrees(math.atan(math.sinh(math.pi*(1-2*(y+1)/n))))
+    return [west,south,east,north]
+
+def _candidate_tiles_for_bbox(bbox, z=12, max_cells=9):
+    minlon,minlat,maxlon,maxlat=bbox
+    xa,ya=_lonlat_tile(minlon,maxlat,z)
+    xb,yb=_lonlat_tile(maxlon,minlat,z)
+    xs=range(min(xa,xb),max(xa,xb)+1)
+    ys=range(min(ya,yb),max(ya,yb)+1)
+    cx=(minlon+maxlon)/2; cy=(minlat+maxlat)/2
+    tx,ty=_lonlat_tile(cx,cy,z)
+    cells=[(x,y) for x in xs for y in ys]
+    cells.sort(key=lambda q:(q[0]-tx)**2+(q[1]-ty)**2)
+    return cells[:max_cells]
+
+def _index_image(item_id: str, mode: str, z: int, x: int, y: int):
+    mode=mode.upper()
+    assets,expr,_=S2_MODE_SPEC[mode]
+    with STACReader(_stac_item_url("sentinel-2-l2a",item_id)) as src:
+        return src.tile(x,y,z,assets=assets,expression=expr,tilesize=96)
+
+def _cell_change_sync(before_id: str, after_id: str, mode: str, z: int, x: int, y: int):
+    import numpy as np
+    a=_index_image(before_id,mode,z,x,y)
+    b=_index_image(after_id,mode,z,x,y)
+    av=np.asarray(a.data[0],dtype="float32")
+    bv=np.asarray(b.data[0],dtype="float32")
+    am=np.asarray(a.mask)>0
+    bm=np.asarray(b.mask)>0
+    valid=am & bm & np.isfinite(av) & np.isfinite(bv)
+    if valid.sum()<200:
+        return None
+    delta=bv[valid]-av[valid]
+    med=float(np.median(delta))
+    mean=float(np.mean(delta))
+    absmean=float(np.mean(np.abs(delta)))
+    negfrac=float(np.mean(delta<-0.12))
+    posfrac=float(np.mean(delta>0.12))
+    validfrac=float(valid.mean())
+    return {"median":med,"mean":mean,"absmean":absmean,"negfrac":negfrac,"posfrac":posfrac,"validfrac":validfrac}
+
+def _scenario_rule(scenario: str, stats: dict):
+    med=stats["median"]; neg=stats["negfrac"]; pos=stats["posfrac"]; ab=stats["absmean"]
+    if scenario=="forest":
+        severity=max(0.0,(-med-0.06)*2.2 + max(0,neg-0.12)*1.4)
+        return severity>0.10, severity, "Снижение NBR: возможное повреждение/вырубка лесного покрова"
+    if scenario=="fire":
+        severity=max(0.0,(-med-0.08)*2.5 + max(0,neg-0.15)*1.5)
+        return severity>0.12, severity, "Снижение NBR: кандидат следа пожара/повреждения"
+    if scenario=="flood":
+        severity=max(0.0,(med-0.05)*2.0 + max(0,pos-0.12)*1.2)
+        return severity>0.10, severity, "Рост NDWI: кандидат расширения воды/переувлажнения"
+    # slope / erosion screening
+    severity=max(0.0,(ab-0.07)*2.0)
+    return severity>0.10, severity, "Изменение NDMI: кандидат структурного изменения склона/влажности"
+
+def _mode_for_scenario(scenario: str):
+    return {"forest":"NBR","fire":"NBR","flood":"NDWI","slope":"NDMI"}.get(scenario,"NBR")
+
+async def _pick_compare_scenes(bbox, days):
+    items=await _stac_search("sentinel-2-l2a",bbox,max(days,75),18,55)
+    if len(items)<2:
+        return None,None,items
+    after=items[0]
+    ad=_dt(after.get("datetime"))
+    before=None
+    if ad:
+        for q in items[1:]:
+            qd=_dt(q.get("datetime"))
+            if qd and (ad-qd).days>=10:
+                before=q; break
+    if before is None:
+        before=items[min(len(items)-1,5)]
+    return before,after,items
+
+@app.get('/api/v3/events/candidates')
+async def event_candidates(bbox: str, days: int=30, scenario: str="forest"):
+    b=_bbox(bbox)
+    scenario=scenario if scenario in {"forest","fire","flood","slope"} else "forest"
+    before,after,items=await _pick_compare_scenes(b,days)
+    events=[]
+    diagnostics={"scene_count":len(items),"mode":_mode_for_scenario(scenario)}
+    if before and after and before.get("id")!=after.get("id"):
+        mode=_mode_for_scenario(scenario)
+        cells=_candidate_tiles_for_bbox(b,12,9)
+        async def one(xy):
+            x,y=xy
+            try:
+                st=await asyncio.to_thread(_cell_change_sync,before["id"],after["id"],mode,12,x,y)
+                return x,y,st
+            except Exception as e:
+                return x,y,{"error":str(e)[:120]}
+        rows=await asyncio.gather(*(one(c) for c in cells))
+        for x,y,st in rows:
+            if not st or "error" in st:
+                continue
+            ok,severity,label=_scenario_rule(scenario,st)
+            if not ok:
+                continue
+            bb=_tile_bounds(x,y,12)
+            score=min(0.98,max(0.20,0.45+severity))
+            events.append({
+                "id":f"cand-{scenario}-12-{x}-{y}",
+                "class":"candidate",
+                "scenario":scenario,
+                "title":label,
+                "confidence":round(score,2),
+                "status":"CANDIDATE_REQUIRES_CONFIRMATION",
+                "source":"Sentinel-2 temporal index change",
+                "mode":mode,
+                "before":{"id":before["id"],"datetime":before.get("datetime")},
+                "after":{"id":after["id"],"datetime":after.get("datetime")},
+                "bbox":bb,
+                "geometry":{"type":"Polygon","coordinates":[[[bb[0],bb[1]],[bb[2],bb[1]],[bb[2],bb[3]],[bb[0],bb[3]],[bb[0],bb[1]]]]},
+                "metrics":{k:round(v,4) for k,v in st.items() if isinstance(v,(int,float))}
+            })
+        events.sort(key=lambda e:e["confidence"],reverse=True)
+        diagnostics.update({"before":before.get("datetime"),"after":after.get("datetime"),"tested_cells":len(cells),"candidate_cells":len(events)})
+    else:
+        diagnostics["reason"]="not enough comparable Sentinel-2 scenes"
+
+    # Direct thermal alerts if FIRMS is configured.
+    f=await firms(bbox,min(days,10))
+    for i,p in enumerate(f.get("features") or []):
+        lon=float(p["lon"]); lat=float(p["lat"])
+        events.append({
+            "id":f"firms-{i}-{p.get('date','')}-{p.get('time','')}",
+            "class":"direct",
+            "scenario":"fire",
+            "title":"FIRMS / VIIRS: термоаномалия",
+            "confidence":0.99,
+            "status":"DIRECT_THERMAL_ALERT",
+            "source":"NASA FIRMS VIIRS",
+            "geometry":{"type":"Point","coordinates":[lon,lat]},
+            "point":[lon,lat],
+            "date":p.get("date"),"time":p.get("time"),"frp":p.get("frp"),"firms_confidence":p.get("confidence")
+        })
+    return {
+        "ok":True,
+        "scenario":scenario,
+        "events":events,
+        "count":len(events),
+        "direct_count":sum(1 for e in events if e["class"]=="direct"),
+        "candidate_count":sum(1 for e in events if e["class"]=="candidate"),
+        "firms_configured":bool(os.getenv("FIRMS_MAP_KEY")),
+        "gfw_mode":"external-evidence",
+        "diagnostics":diagnostics,
+        "warning":"Candidate events are screening signals, not confirmed incidents. Direct FIRMS points are thermal alerts."
     }
 
 # OEO_RENDER_BOOT_SELFTEST_V2
