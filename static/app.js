@@ -1,6 +1,7 @@
 const state={
  map:null,baseLayer:null,aoiLayer:null,aoi:null,config:null,health:null,scenario:'forest',
  s1Scenes:[],s2Scenes:[],nisarScenes:[],footprintLayers:[],events:[],eventLayers:[],eventLayerById:{},alertMeta:null,
+ findingType:'all',minSignal:40,
  s2Layer:null,s1Layer:null,compareLayers:[],compareControl:null,lastActivity:null
 };
 const $=id=>document.getElementById(id);
@@ -138,7 +139,7 @@ function focusEvent(id,open=true){
   if(e.geometry?.type==='Point'){
     const c=l.getLatLng?l.getLatLng():null;if(c)state.map.setView(c,15,{animate:true});
   }else if(l.getBounds){
-    state.map.fitBounds(l.getBounds(),{padding:[70,70],maxZoom:15,animate:true});
+    state.map.fitBounds(l.getBounds(),{padding:[70,70],maxZoom:16,animate:true});
   }
   if(open&&l.openPopup)l.openPopup();
  }catch(err){}
@@ -151,35 +152,65 @@ function compareEvent(id){
  $('beforeScene').value=e.before.id;$('afterScene').value=e.after.id;$('compareMode').value=e.mode||'NBR';
  startCompare();focusEvent(id,false);
 }
+function signalIndex(e){return e.class==='direct'?100:Number(e.signal_index??0)}
+function findingVisible(e){
+ const type=state.findingType||'all';
+ if(type!=='all'&&e.class!==type)return false;
+ return e.class==='direct'||signalIndex(e)>=Number(state.minSignal||0);
+}
+function deltaLabel(e){
+ if(e.class==='direct')return '';
+ const d=Number(e.delta_index||0);
+ return `Δ${e.mode||'index'} ${d>=0?'+':''}${d.toFixed(3)}`;
+}
 function eventCard(e){
- const pct=Math.round((e.confidence||0)*100);
- const direct=e.class==='direct';
+ const direct=e.class==='direct',idx=signalIndex(e);
+ const before=e.before?.datetime?fmtShort(e.before.datetime):'—';
+ const after=e.after?.datetime?fmtShort(e.after.datetime):'—';
+ const area=e.area_ha!=null?`${Number(e.area_ha).toFixed(2)} га`:'—';
  const meta=direct
   ? `${esc(e.source||'')} · ${esc(e.date||'')} ${esc(e.time||'')} ${e.frp?'· FRP '+esc(e.frp):''}`
-  : `${esc(e.source||'')} · ${esc(e.mode||'')} · уверенность ${pct}%`;
+  : `${esc(e.mode||'')} · ${deltaLabel(e)} · площадь ≈ ${area}`;
+ const temporal=direct?'':`<div class="finding-temporal"><span>До <b>${esc(before)}</b></span><span>После <b>${esc(after)}</b></span></div>`;
+ const why=direct
+  ? 'Прямой тепловой сигнал FIRMS/VIIRS.'
+  : `Контур построен по изменившимся пикселям, а не по границе спутникового кадра. Индекс сигнала ${idx}/100 — внутренний score, не вероятность события.`;
  return `<div class="alert-card ${direct?'direct':'candidate'}" style="--event:${eventColor(e)}">
-   <div class="alert-card-head"><span class="alert-class">${eventLabel(e)}</span><span class="alert-score">${direct?'THERMAL':pct+'%'}</span></div>
+   <div class="alert-card-head"><span class="alert-class">${eventLabel(e)}</span><span class="alert-score">${direct?'THERMAL':'сигнал '+idx+'/100'}</span></div>
    <b>${esc(e.title||'Изменение')}</b>
    <small>${meta}</small>
+   ${temporal}
+   <div class="finding-why">${esc(why)}</div>
    <div class="alert-actions"><button data-event-focus="${esc(e.id)}">Показать на карте</button>${(!direct&&e.before?.id&&e.after?.id)?`<button data-event-compare="${esc(e.id)}">До / после</button>`:''}</div>
  </div>`;
+}
+function visibleEvents(){return state.events.filter(findingVisible).sort((a,b)=>signalIndex(b)-signalIndex(a))}
+function syncEventLayerVisibility(){
+ const visible=new Set(visibleEvents().map(e=>e.id));
+ const show=$('eventLayer')?.checked!==false;
+ for(const e of state.events){
+   const l=state.eventLayerById[e.id];if(!l)continue;
+   const should=show&&visible.has(e.id);
+   const on=state.map.hasLayer(l);
+   if(should&&!on)l.addTo(state.map);
+   if(!should&&on)state.map.removeLayer(l);
+ }
+}
+function renderEventList(){
+ const configured=!!state.alertMeta?.firms_configured;
+ const sourceHtml=`<div class="source-strip">
+   <span class="src on">Pixel-change engine: ON</span>
+   <span class="src ${configured?'on':'off'}">FIRMS: ${configured?'ON':'нет ключа'}</span>
+   <span class="src ext">GFW: внешний источник</span>
+ </div>`;
+ const list=visibleEvents();
+ $('alertList').innerHTML=sourceHtml+(list.length?list.map(eventCard).join(''):`<div class="empty"><b>По текущему фильтру находок нет.</b><br>Снизьте минимальный индекс сигнала или включите другой тип.</div>`);
+ $('alertCount').textContent=String(list.length);
+ syncEventLayerVisibility();
 }
 function renderEvents(payload){
  clearEvents();
  state.alertMeta=payload||{};state.events=(payload&&payload.events)||[];
- const configured=!!payload?.firms_configured;
- const sourceHtml=`<div class="source-strip">
-   <span class="src on">Sentinel‑2 candidates: ON</span>
-   <span class="src ${configured?'on':'off'}">FIRMS: ${configured?'ON':'нет ключа'}</span>
-   <span class="src ext">GFW: внешний источник</span>
- </div>`;
- let html=sourceHtml;
- if(state.events.length){
-   html+=state.events.map(eventCard).join('');
- }else{
-   html+=`<div class="empty"><b>На этом AOI находок нет.</b><br>Кандидатный анализ Sentinel‑2 выполнен; FIRMS ${configured?'подключён':'не подключён'}. Новые сцены смотрите во вкладке «Новые данные».</div>`;
- }
- $('alertList').innerHTML=html;$('alertCount').textContent=String(state.events.length);
  for(const e of state.events){
    const col=eventColor(e);let l=null;
    try{
@@ -187,27 +218,32 @@ function renderEvents(payload){
       const [lon,lat]=e.geometry.coordinates;
       l=L.circleMarker([lat,lon],{radius:10,color:'#fff',weight:2,fillColor:col,fillOpacity:.92});
     }else{
-      l=L.geoJSON(e.geometry,{style:{color:col,weight:3,fillColor:col,fillOpacity:.22,dashArray:e.class==='candidate'?'7 4':null}});
+      l=L.geoJSON(e.geometry,{style:{color:col,weight:3,fillColor:col,fillOpacity:.24}});
     }
     if(!l)continue;
-    l.bindPopup(`<b style="color:${col}">${esc(eventLabel(e))}</b><br><strong>${esc(e.title||'')}</strong><br>${esc(e.source||'')}${e.confidence?'<br>Уверенность: '+Math.round(e.confidence*100)+'%':''}`);
-    l.addTo(state.map);state.eventLayers.push(l);state.eventLayerById[e.id]=l;
+    const idx=signalIndex(e),area=e.area_ha!=null?`<br>Площадь ≈ ${Number(e.area_ha).toFixed(2)} га`:'';
+    const delta=e.delta_index!=null?`<br>${deltaLabel(e)}`:'';
+    l.bindPopup(`<b style="color:${col}">${esc(eventLabel(e))}</b><br><strong>${esc(e.title||'')}</strong><br>${esc(e.source||'')}${e.class==='candidate'?'<br>Индекс сигнала: '+idx+'/100':''}${area}${delta}`);
+    state.eventLayers.push(l);state.eventLayerById[e.id]=l;
    }catch(err){}
  }
+ renderEventList();
  const direct=state.events.filter(e=>e.class==='direct').length;
  const cand=state.events.filter(e=>e.class==='candidate').length;
  if(direct>0){
-   $('event').className='event bad';$('event').innerHTML=`<div class="event-icon">!</div><div><b>Прямых алертов: ${direct}</b><span>Есть FIRMS/VIIRS термосигнал. Откройте вкладку «Алерты».</span></div>`;
+   $('event').className='event bad';$('event').innerHTML=`<div class="event-icon">!</div><div><b>Прямых алертов: ${direct}</b><span>Есть FIRMS/VIIRS термосигнал. Откройте вкладку «Находки».</span></div>`;
  }else if(cand>0){
-   $('event').className='event warn';$('event').innerHTML=`<div class="event-icon">△</div><div><b>Кандидатов изменений: ${cand}</b><span>Это автоматический скрининг Sentinel‑2, а не подтверждённое событие. Проверьте «до / после» и SAR.</span></div>`;
+   const top=Math.max(...state.events.filter(e=>e.class==='candidate').map(signalIndex));
+   $('event').className='event warn';$('event').innerHTML=`<div class="event-icon">△</div><div><b>Контуров изменений: ${cand}</b><span>Максимальный индекс сигнала ${top}/100. Это скрининг, не подтверждённое событие.</span></div>`;
  }else{
-   $('event').className='event ok';$('event').innerHTML='<div class="event-icon">✓</div><div><b>Значимых находок не выявлено</b><span>Свежие данные есть, но текущий автоматический скрининг не сформировал кандидатов.</span></div>';
+   $('event').className='event ok';$('event').innerHTML='<div class="event-icon">✓</div><div><b>Значимых находок не выявлено</b><span>Свежие данные есть, но pixel-level скрининг не сформировал контуры выше порога.</span></div>';
  }
  bringOperationalLayers();
- if(state.events.length){
+ const top=visibleEvents()[0];
+ if(top){
    document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active',x.dataset.tab==='alerts'));
    document.querySelectorAll('.tab-body').forEach(x=>x.classList.toggle('active',x.id==='alerts'));
-   focusEvent(state.events[0].id,true);
+   focusEvent(top.id,true);
  }
 }
 
@@ -215,7 +251,7 @@ function addFootprints(){
  clearFootprints();if(!$('footprints').checked)return;
  const groups=[['Sentinel‑1',state.s1Scenes,'#4fc3f7'],['Sentinel‑2',state.s2Scenes,'#79d48d'],['NISAR',state.nisarScenes,'#ffc857']];
  for(const [name,items,color] of groups){for(const x of (items||[]).slice(0,12)){if(!x.geometry)continue;try{
-  const l=L.geoJSON(x.geometry,{style:{color,weight:1,fillOpacity:.025}}).addTo(state.map);
+  const l=L.geoJSON(x.geometry,{style:{color,weight:1,opacity:.34,fillOpacity:0,dashArray:'4 6'}}).addTo(state.map);
   l.bindPopup(`<b>${name}</b><br>${esc(fmtDate(x.datetime))}<br>${esc(x.id||'')}`);state.footprintLayers.push(l);
  }catch(e){}}}
  bringOperationalLayers();
@@ -300,6 +336,18 @@ function renderData(activity){
  $('dataCount').textContent=String(state.s1Scenes.length+state.s2Scenes.length+n.length);
 }
 function renderAlerts(activity){ /* UX4.1: alerts are rendered by renderEvents() */ }
+function renderEvidenceMatrix(activity){
+ const box=$('evidenceMatrix');if(!box)return;
+ const s=activity?.summary||{};
+ const firmsConfigured=!!state.health?.firms_configured;
+ const rows=[
+  ['Sentinel‑2',s.sentinel2>0?'ДОСТУПЕН':'НЕТ',s.sentinel2>0?'оптическое изменение':'нет сцен'],
+  ['Sentinel‑1',s.sentinel1>0?'ДОСТУПЕН':'НЕТ',s.sentinel1>0?'SAR для проверки':'нет сцен'],
+  ['NISAR',s.nisar>0?'ДОСТУПЕН':'НЕТ',s.nisar>0?'L-band контекст':'нет продуктов'],
+  ['FIRMS',firmsConfigured?(s.firms>0?'АЛЕРТ':'ON'):'OFF',firmsConfigured?(s.firms>0?'есть термосигнал':'термоточек нет'):'нужен бесплатный MAP_KEY']
+ ];
+ box.innerHTML=rows.map(r=>`<div><span>${r[0]}</span><b class="${r[1]==='OFF'||r[1]==='НЕТ'?'e-off':'e-on'}">${r[1]}</b><small>${r[2]}</small></div>`).join('');
+}
 async function sensors(){
  try{const p=await getJSON('/api/v3/providers');$('sensorList').innerHTML=p.providers.map(x=>`<div class="item"><b>${esc(x.name)}</b><small>${esc((x.missions||[]).join(' · '))}</small><div class="meta">${esc(x.mode)}${x.key_required?' · требуется ключ':''}</div></div>`).join('')}
  catch(e){$('sensorList').innerHTML='<div class="empty">Не удалось получить состояние провайдеров.</div>'}
@@ -319,8 +367,8 @@ async function scan(){
     getJSON(`/api/v3/sentinel2/search?bbox=${b}&days=${lookback}&max_results=24&cloud_max=70`)
   ]);
   state.s1Scenes=s1.results||[];state.s2Scenes=s2.results||[];
-  renderSummary(activity);fillSceneSelectors();renderData(activity);addFootprints();
-  $('scan').textContent='Анализ изменений…';
+  renderSummary(activity);renderEvidenceMatrix(activity);fillSceneSelectors();renderData(activity);addFootprints();
+  $('scan').textContent='Строю контуры изменений…';
   let ev=null;
   try{ev=await getJSON(`/api/v3/events/candidates?bbox=${b}&days=${days}&scenario=${encodeURIComponent(state.scenario)}`)}
   catch(err){ev={events:[],count:0,firms_configured:state.health?.firms_configured,warning:err.message};toast('Слой находок временно недоступен: '+err.message,5000)}
@@ -338,13 +386,17 @@ function setupTabs(){
 }
 function setupEvents(){
  $('usePreset').onclick=()=>{const p=state.config.presets.find(x=>x.id===$('preset').value);if(p)setPreset(p)};
+ $('demoCase').onclick=async()=>{const p=state.config.presets.find(x=>x.id==='chornohora');if(!p)return;$('preset').value='chornohora';setPreset(p);selectScenario('forest');$('days').value='30';toast('Демо: Чорногора · анализ лесных изменений');await scan()};
  $('drawRect').onclick=()=>new L.Draw.Rectangle(state.map,{shapeOptions:{color:'#49d096',weight:2,fillOpacity:.07}}).enable();
  $('drawPoly').onclick=()=>new L.Draw.Polygon(state.map,{allowIntersection:false,shapeOptions:{color:'#49d096',weight:2,fillOpacity:.07}}).enable();
  $('screenAoi').onclick=currentScreenAOI;$('clearAoi').onclick=clearAOI;$('exportGeo').onclick=exportGeoJSON;
  $('focusAoi').onclick=()=>{if(!state.aoiLayer){toast('Сначала выберите участок');return}state.map.fitBounds(state.aoiLayer.getBounds(),{padding:[50,50],maxZoom:14,animate:true})};
  $('importGeo').onclick=()=>$('geoFile').click();$('geoFile').onchange=e=>{if(e.target.files[0])importGeoFile(e.target.files[0]);e.target.value=''};
  $('scan').onclick=scan;$('refreshTop').onclick=()=>state.aoi?scan():health().then(setUpdated).catch(()=>{});
- $('base').onchange=switchBase;$('footprints').onchange=addFootprints;
+ $('base').onchange=switchBase;$('footprints').onchange=addFootprints;$('eventLayer').onchange=syncEventLayerVisibility;
+ $('findingType').onchange=()=>{state.findingType=$('findingType').value;renderEventList()};
+ $('signalMin').oninput=()=>{state.minSignal=Number($('signalMin').value);$('signalValue').textContent=String(state.minSignal);renderEventList()};
+ $('focusTopFinding').onclick=()=>{const e=visibleEvents()[0];if(e)focusEvent(e.id,true);else toast('Нет находок по текущему фильтру')};
  $('s2Scene').onchange=updateS2Info;$('showS2').onclick=()=>showS2ById($('s2Scene').value,$('s2Mode').value);$('hideS2').onclick=hideS2;
  $('showS1').onclick=()=>showS1ById($('s1Scene').value,$('s1Pol').value);$('hideS1').onclick=hideS1;
  $('startCompare').onclick=startCompare;$('stopCompare').onclick=stopCompare;
