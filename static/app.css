@@ -77,3 +77,24 @@ label{user-select:none}
 .alert-actions button{flex:1;font-size:8px;padding:6px}
 .dot.cand{background:#ffb84d}.dot.direct{background:#ff4d4f}
 .map-legend{flex-wrap:wrap;max-width:70%}
+
+/* OEO UX4.2 PRODUCT HARDENING */
+.demo-btn{width:100%;margin-top:5px;background:linear-gradient(90deg,#184d3b,#1b7556);border-color:#339a73;font-weight:700}
+.finding-controls{border:1px solid #1b4939;background:#091d16;border-radius:9px;padding:8px;margin-bottom:8px;display:grid;gap:6px}
+.finding-controls label{font-size:9px;color:#9dbcae;display:flex;justify-content:space-between;gap:8px}
+.finding-controls input[type=range]{width:100%;accent-color:#ffb84d}
+.finding-controls select,.finding-controls button{font-size:9px}
+.finding-temporal{display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-top:7px}
+.finding-temporal span{padding:5px 6px;background:#081913;border:1px solid #183c31;border-radius:6px;color:#83aa9b;font-size:8px}
+.finding-temporal b{display:block;color:#dff8ee;font-size:9px;margin-top:1px}
+.finding-why{font-size:8px;line-height:1.4;color:#789c8f;margin-top:7px;padding-top:6px;border-top:1px dashed #244a3c}
+.evidence-grid{display:grid;grid-template-columns:1fr 1fr;gap:5px}
+.evidence-grid>div{background:#081913;border:1px solid #183c31;border-radius:7px;padding:6px}
+.evidence-grid span,.evidence-grid small{display:block;font-size:8px;color:#82a899}
+.evidence-grid b{display:block;font-size:10px;margin:2px 0}
+.evidence-grid .e-on{color:#76ddb2}.evidence-grid .e-off{color:#e89c91}
+.alert-card{transition:.14s transform,.14s border-color}
+.alert-card:hover{transform:translateY(-1px);border-color:var(--event)}
+.alert-actions button:first-child{background:#12372b}
+.map-legend{font-size:9px;backdrop-filter:blur(5px)}
+.layer-badge{max-width:55%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
