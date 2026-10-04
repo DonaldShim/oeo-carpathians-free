@@ -142,3 +142,34 @@ async def activity_scan(bbox:str,days:int=30):
       'latest':{'sentinel1':s1[:5],'sentinel2':s2[:5],'nisar':nisar_data.get('results',[])[:5],'firms':firms_data.get('features',[])[:10]},
       'interpretation':'Свіжі дані знайдені. NO_CONFIRMED_EVENT означає, що сам факт нових сцен не є підтвердженим природним або антропогенним событием.'
     }
+
+# OEO_RENDER_BOOT_SELFTEST_V1
+async def _boot_selftest():
+    await asyncio.sleep(2)
+    bbox="24.35,48.02,24.90,48.35"
+    result={"bbox":bbox}
+    try:
+        s1=await sentinel1(bbox=bbox,days=30,max_results=4)
+        result["sentinel1"]={"ok":s1.get("ok"),"count":s1.get("count")}
+    except Exception as e:
+        result["sentinel1"]={"ok":False,"error":str(e)[:180]}
+    try:
+        s2=await sentinel2(bbox=bbox,days=30,max_results=4,cloud_max=60)
+        result["sentinel2"]={"ok":s2.get("ok"),"count":s2.get("count")}
+    except Exception as e:
+        result["sentinel2"]={"ok":False,"error":str(e)[:180]}
+    try:
+        nr=await nisar(bbox=bbox,days=90,max_results=4)
+        result["nisar"]={"ok":nr.get("ok"),"count":nr.get("count"),"reason":nr.get("reason")}
+    except Exception as e:
+        result["nisar"]={"ok":False,"error":str(e)[:180]}
+    try:
+        fr=await firms(bbox=bbox,days=5)
+        result["firms"]={"ok":fr.get("ok"),"configured":fr.get("configured"),"count":fr.get("count")}
+    except Exception as e:
+        result["firms"]={"ok":False,"error":str(e)[:180]}
+    print("OEO_BOOT_SELFTEST "+json.dumps(result,ensure_ascii=False),flush=True)
+
+@app.on_event("startup")
+async def startup_selftest():
+    asyncio.create_task(_boot_selftest())
