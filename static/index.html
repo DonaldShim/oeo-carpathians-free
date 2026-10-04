@@ -3,10 +3,10 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>OEO Карпаты · Полесье 3.2</title>
+<title>OEO Карпаты · Полесье 4.1</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet-draw@1.0.4/dist/leaflet.draw.css">
-<link rel="stylesheet" href="/static/app.css?v=320ux4">
+<link rel="stylesheet" href="/static/app.css?v=410-event-first">
 </head>
 <body>
 <header class="topbar">
@@ -36,6 +36,7 @@
       <button id="screenAoi">Экран → AOI</button>
     </div>
     <div id="aoiLabel" class="aoi-readout">Участок ещё не выбран</div>
+    <button id="focusAoi">◎ Фокус на выбранный AOI</button>
     <div class="button-grid">
       <button id="exportGeo">Экспорт GeoJSON</button>
       <button id="importGeo">Импорт</button>
@@ -135,13 +136,15 @@
     <span><i class="dot s1"></i>Sentinel‑1</span>
     <span><i class="dot s2"></i>Sentinel‑2</span>
     <span><i class="dot ni"></i>NISAR</span>
+    <span><i class="dot cand"></i>кандидат изменения</span>
+    <span><i class="dot direct"></i>прямой алерт</span>
   </div>
 </main>
 
 <aside class="right-panel">
   <div class="tabs">
     <button class="tab active" data-tab="summary">Сводка</button>
-    <button class="tab" data-tab="alerts">Алерты <span id="alertCount">0</span></button>
+    <button class="tab" data-tab="alerts">Находки <span id="alertCount">0</span></button>
     <button class="tab" data-tab="data">Новые данные <span id="dataCount">0</span></button>
     <button class="tab" data-tab="sensors">Сенсоры</button>
   </div>
@@ -176,7 +179,7 @@
   </div>
 
   <div id="alerts" class="tab-body">
-    <div id="alertList" class="feed"><div class="empty">После проверки здесь появятся подтверждённые FIRMS/интегрированные алерты. Свежие сцены показываются отдельно.</div></div>
+    <div id="alertList" class="feed"><div class="empty">После проверки здесь появятся прямые алерты и кандидаты изменений. Новые спутниковые сцены показываются отдельно.</div></div>
   </div>
 
   <div id="data" class="tab-body">
@@ -194,7 +197,7 @@
 
 <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>
-<script src="/static/leaflet-side-by-side.js?v=320ux4"></script>
-<script src="/static/app.js?v=320ux4"></script>
+<script src="/static/leaflet-side-by-side.js?v=410-event-first"></script>
+<script src="/static/app.js?v=410-event-first"></script>
 </body>
 </html>
