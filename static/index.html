@@ -1,31 +1,200 @@
 <!doctype html>
-<html lang="uk">
+<html lang="ru">
 <head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>OEO Карпати · Полісся 3.1</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>OEO Карпаты · Полесье 3.2</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
-<link rel="stylesheet" href="/static/app.css?v=311free1">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet-draw@1.0.4/dist/leaflet.draw.css">
+<link rel="stylesheet" href="/static/app.css?v=320ux4">
 </head>
 <body>
-<header><div><b>OEO Карпати · Полісся 3.1</b><small>безкоштовний моніторинг відкритих супутникових даних</small></div><div class="status"><span id="sysDot"></span><span id="sysText">перевірка…</span><button id="refresh">Оновити</button></div></header>
-<div class="layout">
-<aside class="left">
-  <section><h3>1 · Район</h3><select id="preset"></select><button id="usePreset">Показати район</button><div class="hint" id="aoiLabel">Оберіть район або намалюйте прямокутник на карті.</div></section>
-  <section><h3>2 · Сценарій</h3><div id="scenarios" class="grid"></div><div class="hint" id="scenarioHelp"></div></section>
-  <section><h3>3 · Період</h3><select id="days"><option>7</option><option>14</option><option selected>30</option><option>60</option><option>90</option></select><button class="primary" id="scan">Перевірити ділянку</button></section>
-  <section><h3>4 · Шари</h3><select id="base"><option value="hybrid">EOX Hybrid</option><option value="terrain" selected>EOX Terrain</option><option value="osm">OpenStreetMap</option></select><label><input type="checkbox" id="footprints" checked> контури нових сцен</label></section>
-  <section><h3>Що шукати в Карпатах</h3><div class="hint">Ліс/вітровал → SAR + NBR · Паводок → SAR + NDWI · Пожежа → FIRMS + NBR · Зсув → SAR/NISAR + NDMI.</div></section>
+<header class="topbar">
+  <div class="brand">
+    <div class="brand-main">OEO <strong>Карпаты · Полесье 3.2</strong></div>
+    <div class="brand-sub">мониторинг изменений по открытым спутниковым данным</div>
+  </div>
+  <div class="top-status">
+    <span class="pill"><i id="sysDot"></i><span id="sysText">проверка системы…</span></span>
+    <span class="pill">Участок: <b id="topAoi">не выбран</b></span>
+    <span class="pill">Обновлено: <b id="updatedAt">—</b></span>
+    <button id="refreshTop" class="icon-btn" title="Обновить данные">↻</button>
+  </div>
+</header>
+
+<div class="app">
+<aside class="left-panel">
+  <div class="panel-title">Мониторинг участка</div>
+
+  <section class="control-card">
+    <div class="step"><span>1</span><div><b>Выберите участок</b><small>Карпатский пресет или точная область на карте</small></div></div>
+    <select id="preset"></select>
+    <button id="usePreset" class="primary soft">Показать выбранный район</button>
+    <div class="button-grid three">
+      <button id="drawRect">▭ Прямоугольник</button>
+      <button id="drawPoly">⬡ Полигон</button>
+      <button id="screenAoi">Экран → AOI</button>
+    </div>
+    <div id="aoiLabel" class="aoi-readout">Участок ещё не выбран</div>
+    <div class="button-grid">
+      <button id="exportGeo">Экспорт GeoJSON</button>
+      <button id="importGeo">Импорт</button>
+    </div>
+    <input id="geoFile" type="file" accept=".geojson,.json" hidden>
+    <button id="clearAoi" class="danger ghost">Очистить участок</button>
+  </section>
+
+  <section class="control-card">
+    <div class="step"><span>2</span><div><b>Сценарий Карпат</b><small>Настраивает период, подложку и аналитический режим</small></div></div>
+    <div id="scenarios" class="scenario-grid"></div>
+    <div id="scenarioHelp" class="help"></div>
+  </section>
+
+  <section class="control-card">
+    <div class="step"><span>3</span><div><b>Проверьте изменения</b><small>Ищет свежие Sentinel‑1 / Sentinel‑2 / NISAR и алерты</small></div></div>
+    <label class="field-label">Период мониторинга</label>
+    <select id="days"><option value="7">7 дней</option><option value="14">14 дней</option><option value="30" selected>30 дней</option><option value="60">60 дней</option><option value="90">90 дней</option></select>
+    <button id="scan" class="primary big">Проверить участок</button>
+  </section>
+
+  <section class="control-card">
+    <div class="step"><span>4</span><div><b>Слои карты</b><small>Подложка, контуры сцен и внешние доказательства</small></div></div>
+    <label class="field-label">Подложка</label>
+    <select id="base">
+      <option value="esri">Esri — детальная спутниковая</option>
+      <option value="cloudless">EOX Cloudless 2025</option>
+      <option value="hybrid" selected>EOX Hybrid</option>
+      <option value="terrain">EOX Terrain</option>
+      <option value="osm">OpenStreetMap</option>
+      <option value="topo">OpenTopoMap</option>
+    </select>
+    <label class="switch-row"><input type="checkbox" id="footprints" checked><span>Контуры новых сцен</span></label>
+    <div class="button-grid">
+      <button id="openGfw">GFW лесные алерты ↗</button>
+      <button id="openFirms">FIRMS пожары ↗</button>
+    </div>
+  </section>
+
+  <section class="control-card">
+    <div class="step"><span>5</span><div><b>Sentinel‑2 аналитика</b><small>RGB, NDVI, NDWI, MNDWI, NDMI, NBR</small></div></div>
+    <label class="field-label">Сцена / дата</label>
+    <select id="s2Scene"><option value="">Сначала проверьте участок</option></select>
+    <label class="field-label">Режим</label>
+    <select id="s2Mode">
+      <option value="RGB">RGB — обычный снимок</option>
+      <option value="NDVI">NDVI — растительность</option>
+      <option value="NDWI">NDWI — вода</option>
+      <option value="MNDWI">MNDWI — открытая вода</option>
+      <option value="NDMI">NDMI — влажность</option>
+      <option value="NBR">NBR — пожар / повреждение</option>
+    </select>
+    <div class="button-grid">
+      <button id="showS2" class="primary soft">Показать слой</button>
+      <button id="hideS2">Скрыть слой</button>
+    </div>
+    <div id="s2Info" class="help">Сцены выбираются после проверки AOI.</div>
+  </section>
+
+  <section class="control-card">
+    <div class="step"><span>6</span><div><b>Sentinel‑1 SAR</b><small>Работает сквозь облака; VV/VH — структурный сигнал, не тепло</small></div></div>
+    <select id="s1Scene"><option value="">Сначала проверьте участок</option></select>
+    <div class="button-grid">
+      <select id="s1Pol"><option value="VV">VV</option><option value="VH">VH</option></select>
+      <button id="showS1" class="primary soft">Показать SAR</button>
+    </div>
+    <button id="hideS1">Скрыть SAR</button>
+  </section>
+
+  <section class="control-card">
+    <div class="step"><span>7</span><div><b>Сравнить «до / после»</b><small>Две реальные Sentinel‑2 сцены на одном экране</small></div></div>
+    <div class="compare-dates">
+      <div><label class="field-label">До</label><select id="beforeScene"><option value="">—</option></select></div>
+      <div><label class="field-label">После</label><select id="afterScene"><option value="">—</option></select></div>
+    </div>
+    <label class="field-label">Режим сравнения</label>
+    <select id="compareMode">
+      <option value="RGB">RGB</option>
+      <option value="NDVI">NDVI</option>
+      <option value="NDWI">NDWI</option>
+      <option value="NDMI">NDMI</option>
+      <option value="NBR">NBR</option>
+    </select>
+    <div class="button-grid">
+      <button id="startCompare" class="primary">Запустить сравнение</button>
+      <button id="stopCompare">Остановить</button>
+    </div>
+    <div id="compareInfo" class="help">После загрузки сцен появится интерактивный разделитель «до ↔ после».</div>
+  </section>
 </aside>
-<main><div id="map"></div><div class="mapnote">Пресети — оперативні області пошуку, не адміністративні межі.</div></main>
-<aside class="right">
- <div class="tabs"><button class="tab active" data-tab="summary">Зведення</button><button class="tab" data-tab="alerts">Алерти</button><button class="tab" data-tab="data">Нові дані</button><button class="tab" data-tab="sensors">Сенсори</button></div>
- <section id="summary" class="tabbody active"><div id="event" class="event waiting"><b>Очікує перевірки</b><span>Оберіть район і натисніть «Перевірити ділянку».</span></div><div class="metrics"><div><span>Готовність</span><b id="ready">—</b></div><div><span>Sentinel‑1</span><b id="s1">—</b></div><div><span>Sentinel‑2</span><b id="s2">—</b></div><div><span>NISAR</span><b id="nisar">—</b></div><div><span>FIRMS</span><b id="firms">—</b></div></div><div class="explain" id="explain">Нові сцени ≠ підтверджена подія. OEO відокремлює наявність нових даних від факту зміни.</div></section>
- <section id="alerts" class="tabbody"><div id="alertList" class="feed empty">Підтверджених алертів ще немає.</div></section>
- <section id="data" class="tabbody"><div id="dataList" class="feed empty">Після перевірки тут з’являться нові Sentinel‑1 / Sentinel‑2 / NISAR дані.</div></section>
- <section id="sensors" class="tabbody"><div id="sensorList" class="feed"></div></section>
+
+<main class="map-wrap">
+  <div id="map"></div>
+  <div id="mapHint" class="map-hint"><b>Начните с участка.</b> Выберите карпатский район слева или нарисуйте точный AOI.</div>
+  <div id="layerBadge" class="layer-badge" hidden></div>
+  <div class="map-legend">
+    <span><i class="dot s1"></i>Sentinel‑1</span>
+    <span><i class="dot s2"></i>Sentinel‑2</span>
+    <span><i class="dot ni"></i>NISAR</span>
+  </div>
+</main>
+
+<aside class="right-panel">
+  <div class="tabs">
+    <button class="tab active" data-tab="summary">Сводка</button>
+    <button class="tab" data-tab="alerts">Алерты <span id="alertCount">0</span></button>
+    <button class="tab" data-tab="data">Новые данные <span id="dataCount">0</span></button>
+    <button class="tab" data-tab="sensors">Сенсоры</button>
+  </div>
+
+  <div id="summary" class="tab-body active">
+    <section class="summary-card">
+      <div class="summary-kicker">Состояние участка</div>
+      <div id="event" class="event waiting">
+        <div class="event-icon">◎</div>
+        <div><b>Ожидает проверки</b><span>Выберите участок и запустите мониторинг.</span></div>
+      </div>
+    </section>
+
+    <div class="metrics">
+      <div><span>Готовность данных</span><b id="ready">—</b><small>мультисенсорность</small></div>
+      <div><span>Sentinel‑1</span><b id="s1">—</b><small>свежих продуктов</small></div>
+      <div><span>Sentinel‑2</span><b id="s2">—</b><small>оптических сцен</small></div>
+      <div><span>NISAR</span><b id="nisar">—</b><small>свежих продуктов</small></div>
+      <div><span>FIRMS</span><b id="firms">—</b><small>термоточек</small></div>
+      <div><span>Период</span><b id="periodMetric">30д</b><small>окно поиска</small></div>
+    </div>
+
+    <section class="meaning-card">
+      <div class="card-head"><b>Что это значит</b><span id="confidenceBadge" class="badge">нет данных</span></div>
+      <p id="explain">OEO разделяет <b>новые данные</b> и <b>подтверждённое событие</b>. Появление свежего снимка само по себе не считается вырубкой, пожаром или оползнем.</p>
+    </section>
+
+    <section class="meaning-card">
+      <div class="card-head"><b>Активный слой</b><span id="activeLayerKind" class="badge muted">подложка</span></div>
+      <p id="activeLayerText">Аналитический слой пока не включён.</p>
+    </section>
+  </div>
+
+  <div id="alerts" class="tab-body">
+    <div id="alertList" class="feed"><div class="empty">После проверки здесь появятся подтверждённые FIRMS/интегрированные алерты. Свежие сцены показываются отдельно.</div></div>
+  </div>
+
+  <div id="data" class="tab-body">
+    <div class="feed-head"><b>Последние поступившие данные</b><span>live</span></div>
+    <div id="dataList" class="feed"><div class="empty">После проверки здесь появятся последние Sentinel‑1, Sentinel‑2 и NISAR продукты.</div></div>
+  </div>
+
+  <div id="sensors" class="tab-body">
+    <div id="sensorList" class="feed"></div>
+  </div>
 </aside>
 </div>
+
 <div id="toast"></div>
+
 <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="/static/app.js?v=311free1"></script>
-</body></html>
+<script src="https://cdn.jsdelivr.net/npm/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>
+<script src="/static/leaflet-side-by-side.js?v=320ux4"></script>
+<script src="/static/app.js?v=320ux4"></script>
+</body>
+</html>
