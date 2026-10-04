@@ -204,7 +204,11 @@ function renderEvents(payload){
    $('event').className='event ok';$('event').innerHTML='<div class="event-icon">✓</div><div><b>Значимых находок не выявлено</b><span>Свежие данные есть, но текущий автоматический скрининг не сформировал кандидатов.</span></div>';
  }
  bringOperationalLayers();
- if(state.events.length)focusEvent(state.events[0].id,true);
+ if(state.events.length){
+   document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active',x.dataset.tab==='alerts'));
+   document.querySelectorAll('.tab-body').forEach(x=>x.classList.toggle('active',x.id==='alerts'));
+   focusEvent(state.events[0].id,true);
+ }
 }
 
 function addFootprints(){
@@ -337,6 +341,7 @@ function setupEvents(){
  $('drawRect').onclick=()=>new L.Draw.Rectangle(state.map,{shapeOptions:{color:'#49d096',weight:2,fillOpacity:.07}}).enable();
  $('drawPoly').onclick=()=>new L.Draw.Polygon(state.map,{allowIntersection:false,shapeOptions:{color:'#49d096',weight:2,fillOpacity:.07}}).enable();
  $('screenAoi').onclick=currentScreenAOI;$('clearAoi').onclick=clearAOI;$('exportGeo').onclick=exportGeoJSON;
+ $('focusAoi').onclick=()=>{if(!state.aoiLayer){toast('Сначала выберите участок');return}state.map.fitBounds(state.aoiLayer.getBounds(),{padding:[50,50],maxZoom:14,animate:true})};
  $('importGeo').onclick=()=>$('geoFile').click();$('geoFile').onchange=e=>{if(e.target.files[0])importGeoFile(e.target.files[0]);e.target.value=''};
  $('scan').onclick=scan;$('refreshTop').onclick=()=>state.aoi?scan():health().then(setUpdated).catch(()=>{});
  $('base').onchange=switchBase;$('footprints').onchange=addFootprints;
