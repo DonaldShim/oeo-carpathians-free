@@ -3,3 +3,4 @@ uvicorn[standard]==0.34.0
 httpx==0.28.1
 asf-search==13.1.1
 rio-tiler==9.4.2
+pyproj==3.7.2
