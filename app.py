@@ -13,13 +13,16 @@ os.environ.setdefault("AWS_DEFAULT_REGION","us-west-2")
 import httpx
 from rio_tiler.io import STACReader
 from rio_tiler.colormap import cmap
+from rasterio.features import shapes
+from rasterio.warp import transform_geom
+from pyproj import Geod
 
 ROOT = Path(__file__).parent
 STATIC = ROOT / 'static'
 CFG = json.loads((ROOT / 'CARPATHIANS_CONFIG.json').read_text(encoding='utf-8'))
 EARTH_SEARCH = 'https://earth-search.aws.element84.com/v1'
 
-app = FastAPI(title='OEO Карпати · Полісся 3.1 Free', version='4.1.0-free')
+app = FastAPI(title='OEO Карпати · Полісся 3.1 Free', version='4.2.0-free')
 app.mount('/static', StaticFiles(directory=STATIC), name='static')
 
 @app.get('/')
@@ -29,11 +32,11 @@ async def root():
 @app.get('/health')
 async def health():
     return {
-        'monitor':'ok', 'version':'4.1.0-free', 'profile':'render-free',
+        'monitor':'ok', 'version':'4.2.0-free', 'profile':'render-free',
         'region':'Українські Карпати + Полісся', 'stac':True,
         'sentinel1':True, 'sentinel2':True, 'nisar':True,
         'firms_configured': bool(os.getenv('FIRMS_MAP_KEY')),
-        'gfw_mode':'external-evidence','event_engine':'sentinel2-temporal-candidates-v41'
+        'gfw_mode':'external-evidence','event_engine':'sentinel2-pixel-polygons-v42'
     }
 
 @app.get('/api/config')
@@ -205,7 +208,7 @@ async def activity_scan(bbox:str,days:int=30):
     }
 
 
-# OEO_EVENT_CANDIDATES_V41
+# OEO_EVENT_CANDIDATES_V42\n_EVENT_CACHE = {}
 def _dt(v):
     if not v:
         return None
@@ -247,9 +250,57 @@ def _index_image(item_id: str, mode: str, z: int, x: int, y: int):
     mode=mode.upper()
     assets,expr,_=S2_MODE_SPEC[mode]
     with STACReader(_stac_item_url("sentinel-2-l2a",item_id)) as src:
-        return src.tile(x,y,z,assets=assets,expression=expr,tilesize=96)
+        return src.tile(x,y,z,assets=assets,expression=expr,tilesize=256)
 
-def _cell_change_sync(before_id: str, after_id: str, mode: str, z: int, x: int, y: int):
+_GEOD = Geod(ellps="WGS84")
+
+def _geodesic_area_ha(geom: dict):
+    def ring_area(ring):
+        if len(ring)<4:
+            return 0.0
+        lons=[p[0] for p in ring]; lats=[p[1] for p in ring]
+        area,_=_GEOD.polygon_area_perimeter(lons,lats)
+        return abs(area)
+    if geom.get("type")=="Polygon":
+        rings=geom.get("coordinates") or []
+        if not rings:
+            return 0.0
+        area=ring_area(rings[0])-sum(ring_area(r) for r in rings[1:])
+        return max(0.0,area)/10000.0
+    if geom.get("type")=="MultiPolygon":
+        total=0.0
+        for poly in geom.get("coordinates") or []:
+            if poly:
+                total+=ring_area(poly[0])-sum(ring_area(r) for r in poly[1:])
+        return max(0.0,total)/10000.0
+    return 0.0
+
+def _geom_bbox(geom: dict):
+    pts=[]
+    def walk(v):
+        if isinstance(v,(list,tuple)):
+            if len(v)>=2 and isinstance(v[0],(int,float)) and isinstance(v[1],(int,float)):
+                pts.append((float(v[0]),float(v[1])))
+            else:
+                for q in v:
+                    walk(q)
+    walk(geom.get("coordinates"))
+    if not pts:
+        return None
+    xs=[p[0] for p in pts]; ys=[p[1] for p in pts]
+    return [min(xs),min(ys),max(xs),max(ys)]
+
+def _scenario_pixel_mask(scenario: str, delta, valid):
+    import numpy as np
+    if scenario=="forest":
+        return valid & (delta < -0.12), "NBR", "Снижение NBR: возможное повреждение/вырубка лесного покрова", 0.35
+    if scenario=="fire":
+        return valid & (delta < -0.14), "NBR", "Снижение NBR: кандидат следа пожара/повреждения", 0.35
+    if scenario=="flood":
+        return valid & (delta > 0.12), "NDWI", "Рост NDWI: кандидат расширения воды/переувлажнения", 0.40
+    return valid & (np.abs(delta) > 0.12), "NDMI", "Изменение NDMI: кандидат структурного изменения склона/влажности", 0.25
+
+def _cell_change_sync(before_id: str, after_id: str, mode: str, scenario: str, z: int, x: int, y: int):
     import numpy as np
     a=_index_image(before_id,mode,z,x,y)
     b=_index_image(after_id,mode,z,x,y)
@@ -258,31 +309,46 @@ def _cell_change_sync(before_id: str, after_id: str, mode: str, z: int, x: int, 
     am=np.asarray(a.mask)>0
     bm=np.asarray(b.mask)>0
     valid=am & bm & np.isfinite(av) & np.isfinite(bv)
-    if valid.sum()<200:
+    if valid.sum()<800:
         return None
-    delta=bv[valid]-av[valid]
-    med=float(np.median(delta))
-    mean=float(np.mean(delta))
-    absmean=float(np.mean(np.abs(delta)))
-    negfrac=float(np.mean(delta<-0.12))
-    posfrac=float(np.mean(delta>0.12))
-    validfrac=float(valid.mean())
-    return {"median":med,"mean":mean,"absmean":absmean,"negfrac":negfrac,"posfrac":posfrac,"validfrac":validfrac}
+    delta=np.full(av.shape,np.nan,dtype="float32")
+    delta[valid]=bv[valid]-av[valid]
+    change_mask,metric,label,min_area_ha=_scenario_pixel_mask(scenario,delta,valid)
+    changed=int(change_mask.sum())
+    if changed<8:
+        return {"stats":{"valid_fraction":float(valid.mean()),"changed_fraction":0.0},"polygons":[]}
+    changed_vals=delta[change_mask]
+    stats={
+        "median_delta":float(np.median(delta[valid])),
+        "mean_delta":float(np.mean(delta[valid])),
+        "mean_changed_delta":float(np.mean(changed_vals)),
+        "median_changed_delta":float(np.median(changed_vals)),
+        "changed_fraction":float(changed/valid.sum()),
+        "valid_fraction":float(valid.mean()),
+        "changed_pixels":changed,
+    }
+    polys=[]
+    for geom,val in shapes(change_mask.astype("uint8"),mask=change_mask,transform=a.transform):
+        if int(val)!=1:
+            continue
+        try:
+            wgs=transform_geom(str(a.crs),"EPSG:4326",geom,precision=6)
+            area_ha=_geodesic_area_ha(wgs)
+            if area_ha<min_area_ha:
+                continue
+            polys.append({"geometry":wgs,"bbox":_geom_bbox(wgs),"area_ha":float(area_ha)})
+        except Exception:
+            continue
+    polys.sort(key=lambda p:p["area_ha"],reverse=True)
+    return {"stats":stats,"polygons":polys[:8],"metric":metric,"label":label}
 
-def _scenario_rule(scenario: str, stats: dict):
-    med=stats["median"]; neg=stats["negfrac"]; pos=stats["posfrac"]; ab=stats["absmean"]
-    if scenario=="forest":
-        severity=max(0.0,(-med-0.06)*2.2 + max(0,neg-0.12)*1.4)
-        return severity>0.10, severity, "Снижение NBR: возможное повреждение/вырубка лесного покрова"
-    if scenario=="fire":
-        severity=max(0.0,(-med-0.08)*2.5 + max(0,neg-0.15)*1.5)
-        return severity>0.12, severity, "Снижение NBR: кандидат следа пожара/повреждения"
-    if scenario=="flood":
-        severity=max(0.0,(med-0.05)*2.0 + max(0,pos-0.12)*1.2)
-        return severity>0.10, severity, "Рост NDWI: кандидат расширения воды/переувлажнения"
-    # slope / erosion screening
-    severity=max(0.0,(ab-0.07)*2.0)
-    return severity>0.10, severity, "Изменение NDMI: кандидат структурного изменения склона/влажности"
+def _signal_index(scenario: str, stats: dict, area_ha: float):
+    d=abs(float(stats.get("mean_changed_delta",0.0)))
+    frac=float(stats.get("changed_fraction",0.0))
+    magnitude=min(1.0,max(0.0,(d-0.08)/0.22))
+    density=min(1.0,frac/0.25)
+    area=min(1.0,max(0.0,area_ha)/8.0)
+    return int(round(min(100,max(0,28+42*magnitude+20*density+10*area))))
 
 def _mode_for_scenario(scenario: str):
     return {"forest":"NBR","fire":"NBR","flood":"NDWI","slope":"NDMI"}.get(scenario,"NBR")
@@ -307,6 +373,11 @@ async def _pick_compare_scenes(bbox, days):
 async def event_candidates(bbox: str, days: int=30, scenario: str="forest"):
     b=_bbox(bbox)
     scenario=scenario if scenario in {"forest","fire","flood","slope"} else "forest"
+    _now=__import__("time").time()
+    _key=(tuple(round(v,5) for v in b),int(days),scenario)
+    _cached=_EVENT_CACHE.get(_key)
+    if _cached and _now-_cached[0] < 600:
+        return dict(_cached[1], cache_hit=True)
     before,after,items=await _pick_compare_scenes(b,days)
     events=[]
     diagnostics={"scene_count":len(items),"mode":_mode_for_scenario(scenario)}
@@ -316,36 +387,47 @@ async def event_candidates(bbox: str, days: int=30, scenario: str="forest"):
         async def one(xy):
             x,y=xy
             try:
-                st=await asyncio.to_thread(_cell_change_sync,before["id"],after["id"],mode,12,x,y)
+                st=await asyncio.to_thread(_cell_change_sync,before["id"],after["id"],mode,scenario,12,x,y)
                 return x,y,st
             except Exception as e:
-                return x,y,{"error":str(e)[:120]}
+                return x,y,{"error":str(e)[:160]}
         rows=await asyncio.gather(*(one(c) for c in cells))
+        polygon_count=0
         for x,y,st in rows:
             if not st or "error" in st:
                 continue
-            ok,severity,label=_scenario_rule(scenario,st)
-            if not ok:
-                continue
-            bb=_tile_bounds(x,y,12)
-            score=min(0.98,max(0.20,0.45+severity))
-            events.append({
-                "id":f"cand-{scenario}-12-{x}-{y}",
-                "class":"candidate",
-                "scenario":scenario,
-                "title":label,
-                "confidence":round(score,2),
-                "status":"CANDIDATE_REQUIRES_CONFIRMATION",
-                "source":"Sentinel-2 temporal index change",
-                "mode":mode,
-                "before":{"id":before["id"],"datetime":before.get("datetime")},
-                "after":{"id":after["id"],"datetime":after.get("datetime")},
-                "bbox":bb,
-                "geometry":{"type":"Polygon","coordinates":[[[bb[0],bb[1]],[bb[2],bb[1]],[bb[2],bb[3]],[bb[0],bb[3]],[bb[0],bb[1]]]]},
-                "metrics":{k:round(v,4) for k,v in st.items() if isinstance(v,(int,float))}
-            })
-        events.sort(key=lambda e:e["confidence"],reverse=True)
-        diagnostics.update({"before":before.get("datetime"),"after":after.get("datetime"),"tested_cells":len(cells),"candidate_cells":len(events)})
+            stats=st.get("stats") or {}
+            for j,p in enumerate(st.get("polygons") or []):
+                polygon_count+=1
+                area_ha=float(p.get("area_ha") or 0.0)
+                idx=_signal_index(scenario,stats,area_ha)
+                events.append({
+                    "id":f"cand-{scenario}-12-{x}-{y}-{j}",
+                    "class":"candidate",
+                    "scenario":scenario,
+                    "title":st.get("label") or "Кандидат изменения",
+                    "signal_index":idx,
+                    "signal_label":"индекс сигнала, не вероятность",
+                    "status":"CANDIDATE_REQUIRES_CONFIRMATION",
+                    "source":"Sentinel-2 pixel-level temporal index mask",
+                    "mode":st.get("metric") or mode,
+                    "before":{"id":before["id"],"datetime":before.get("datetime")},
+                    "after":{"id":after["id"],"datetime":after.get("datetime")},
+                    "bbox":p.get("bbox"),
+                    "geometry":p.get("geometry"),
+                    "area_ha":round(area_ha,2),
+                    "delta_index":round(float(stats.get("mean_changed_delta",0.0)),4),
+                    "changed_fraction":round(float(stats.get("changed_fraction",0.0)),4),
+                    "analysis_geometry":"pixel_mask_polygon",
+                    "metrics":{k:round(v,4) if isinstance(v,float) else v for k,v in stats.items()}
+                })
+        events.sort(key=lambda e:(e.get("signal_index",0),e.get("area_ha",0)),reverse=True)
+        events=events[:24]
+        diagnostics.update({
+            "before":before.get("datetime"),"after":after.get("datetime"),
+            "tested_cells":len(cells),"candidate_polygons":len(events),
+            "raw_polygons":polygon_count,"geometry":"pixel_mask_polygon","tile_zoom":12,"tile_pixels":256
+        })
     else:
         diagnostics["reason"]="not enough comparable Sentinel-2 scenes"
 
@@ -358,14 +440,15 @@ async def event_candidates(bbox: str, days: int=30, scenario: str="forest"):
             "class":"direct",
             "scenario":"fire",
             "title":"FIRMS / VIIRS: термоаномалия",
-            "confidence":0.99,
+            "signal_index":100,
+            "signal_label":"прямой тепловой алерт",
             "status":"DIRECT_THERMAL_ALERT",
             "source":"NASA FIRMS VIIRS",
             "geometry":{"type":"Point","coordinates":[lon,lat]},
             "point":[lon,lat],
             "date":p.get("date"),"time":p.get("time"),"frp":p.get("frp"),"firms_confidence":p.get("confidence")
         })
-    return {
+    _result={
         "ok":True,
         "scenario":scenario,
         "events":events,
@@ -375,8 +458,14 @@ async def event_candidates(bbox: str, days: int=30, scenario: str="forest"):
         "firms_configured":bool(os.getenv("FIRMS_MAP_KEY")),
         "gfw_mode":"external-evidence",
         "diagnostics":diagnostics,
-        "warning":"Candidate events are screening signals, not confirmed incidents. Direct FIRMS points are thermal alerts."
+        "warning":"Candidate polygons are pixel-level screening signals, not confirmed incidents. signal_index is an internal signal score, not a calibrated probability. Direct FIRMS points are thermal alerts.",
+        "cache_hit":False
     }
+    _EVENT_CACHE[_key]=(_now,_result)
+    if len(_EVENT_CACHE)>48:
+        for k in list(_EVENT_CACHE)[:16]:
+            _EVENT_CACHE.pop(k,None)
+    return _result
 
 # OEO_RENDER_BOOT_SELFTEST_V2
 def _tile_xyz(lon: float, lat: float, z: int):
