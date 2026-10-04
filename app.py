@@ -343,10 +343,13 @@ def _coarse_change_sync(before_id: str, after_id: str, mode: str, scenario: str,
         return {"score":0.0,"valid_fraction":float(valid.mean())}
     delta=np.full(av.shape,np.nan,dtype="float32")
     delta[valid]=bv[valid]-av[valid]
-    mask,_,_,_=_scenario_pixel_mask(scenario,delta,valid)
+    baseline=float(np.median(delta[valid]))
+    residual=np.full(av.shape,np.nan,dtype="float32")
+    residual[valid]=delta[valid]-baseline
+    mask,_,_,_=_scenario_pixel_mask(scenario,residual,valid)
     frac=float(mask.sum()/max(1,valid.sum()))
     if mask.any():
-        mag=float(np.mean(np.abs(delta[mask])))
+        mag=float(np.mean(np.abs(residual[mask])))
     else:
         mag=0.0
     # Rank only; not surfaced as evidence.
@@ -366,7 +369,10 @@ def _cell_change_sync(before_id: str, after_id: str, mode: str, scenario: str, z
         return None
     delta=np.full(av.shape,np.nan,dtype="float32")
     delta[valid]=bv[valid]-av[valid]
-    change_mask,metric,label,min_area_ha=_scenario_pixel_mask(scenario,delta,valid)
+    scene_baseline=float(np.median(delta[valid]))
+    residual=np.full(av.shape,np.nan,dtype="float32")
+    residual[valid]=delta[valid]-scene_baseline
+    change_mask,metric,label,min_area_ha=_scenario_pixel_mask(scenario,residual,valid)
     changed=int(change_mask.sum())
     if changed<8:
         return {"stats":{"valid_fraction":float(valid.mean()),"changed_fraction":0.0,"cloud_masked":True},"polygons":[]}
@@ -381,7 +387,10 @@ def _cell_change_sync(before_id: str, after_id: str, mode: str, scenario: str, z
         valid=valid & (~bad)
         delta=np.full(av.shape,np.nan,dtype="float32")
         delta[valid]=bv[valid]-av[valid]
-        change_mask,metric,label,min_area_ha=_scenario_pixel_mask(scenario,delta,valid)
+        scene_baseline=float(np.median(delta[valid]))
+        residual=np.full(av.shape,np.nan,dtype="float32")
+        residual[valid]=delta[valid]-scene_baseline
+        change_mask,metric,label,min_area_ha=_scenario_pixel_mask(scenario,residual,valid)
         changed=int(change_mask.sum())
         if changed<8:
             return {"stats":{"valid_fraction":float(valid.mean()),"changed_fraction":0.0,"cloud_masked":True},"polygons":[]}
@@ -389,11 +398,15 @@ def _cell_change_sync(before_id: str, after_id: str, mode: str, scenario: str, z
         # Do not fabricate a cloud-free claim if SCL is unavailable.
         return {"stats":{"valid_fraction":float(valid.mean()),"changed_fraction":0.0,"cloud_masked":False,"scl_error":True},"polygons":[]}
     changed_vals=delta[change_mask]
+    changed_residual=residual[change_mask]
     stats={
+        "scene_baseline_delta":scene_baseline,
         "median_delta":float(np.median(delta[valid])),
         "mean_delta":float(np.mean(delta[valid])),
         "mean_changed_delta":float(np.mean(changed_vals)),
         "median_changed_delta":float(np.median(changed_vals)),
+        "mean_residual_delta":float(np.mean(changed_residual)),
+        "median_residual_delta":float(np.median(changed_residual)),
         "changed_fraction":float(changed/valid.sum()),
         "valid_fraction":float(valid.mean()),
         "changed_pixels":changed,
@@ -480,18 +493,26 @@ def _aoi_change_sync(before_id: str, after_id: str, mode: str, scenario: str, bb
 
     delta=np.full(av.shape,np.nan,dtype="float32")
     delta[valid]=bv[valid]-av[valid]
-    change_mask,metric,label,min_area_ha=_scenario_pixel_mask(scenario,delta,valid)
+    # Compensation: remove scene-wide seasonal/radiometric shift.
+    scene_baseline=float(np.median(delta[valid]))
+    residual=np.full(av.shape,np.nan,dtype="float32")
+    residual[valid]=delta[valid]-scene_baseline
+    change_mask,metric,label,min_area_ha=_scenario_pixel_mask(scenario,residual,valid)
     change_mask=_despeckle(change_mask)
     changed=int(change_mask.sum())
     if changed<8:
         return {"stats":{"valid_fraction":float(valid.mean()),"changed_fraction":0.0,"cloud_masked":True},"polygons":[],"resolution_m":res_m,"width":width,"height":height}
 
     changed_vals=delta[change_mask]
+    changed_residual=residual[change_mask]
     stats={
+        "scene_baseline_delta":scene_baseline,
         "median_delta":float(np.median(delta[valid])),
         "mean_delta":float(np.mean(delta[valid])),
         "mean_changed_delta":float(np.mean(changed_vals)),
         "median_changed_delta":float(np.median(changed_vals)),
+        "mean_residual_delta":float(np.mean(changed_residual)),
+        "median_residual_delta":float(np.median(changed_residual)),
         "changed_fraction":float(changed/max(1,valid.sum())),
         "valid_fraction":float(valid.mean()),
         "changed_pixels":changed,
@@ -518,7 +539,7 @@ def _aoi_change_sync(before_id: str, after_id: str, mode: str, scenario: str, bb
     }
 
 def _signal_index(scenario: str, stats: dict, area_ha: float):
-    d=abs(float(stats.get("mean_changed_delta",0.0)))
+    d=abs(float(stats.get("mean_residual_delta",stats.get("mean_changed_delta",0.0))))
     frac=float(stats.get("changed_fraction",0.0))
     magnitude=min(1.0,max(0.0,(d-0.08)/0.22))
     density=min(1.0,frac/0.25)
@@ -613,6 +634,8 @@ async def event_candidates(bbox: str, days: int=30, scenario: str="forest"):
                     "geometry":p.get("geometry"),
                     "area_ha":round(area_ha,2),
                     "delta_index":round(float(stats.get("mean_changed_delta",0.0)),4),
+                    "residual_delta":round(float(stats.get("mean_residual_delta",stats.get("mean_changed_delta",0.0))),4),
+                    "scene_baseline_delta":round(float(stats.get("scene_baseline_delta",0.0)),4),
                     "changed_fraction":round(float(stats.get("changed_fraction",0.0)),4),
                     "analysis_geometry":"cloud_masked_pixel_polygon",
                     "analysis_resolution_m":round(float(st.get("resolution_m") or 0),1) if st.get("resolution_m") else None,
@@ -626,6 +649,7 @@ async def event_candidates(bbox: str, days: int=30, scenario: str="forest"):
             "candidate_polygons":len(events),"raw_polygons":polygon_count,
             "geometry":"cloud_masked_pixel_polygon",
             "sampling":"whole_aoi_contiguous" if strategy=="whole_aoi_part" else "uniform_aoi_two_stage",
+            "compensation":"scene_median_delta",
             "analysis_resolution_m":round(float(exact.get("resolution_m") or 0),1) if exact.get("resolution_m") else None,
             "raster_width":exact.get("width"),"raster_height":exact.get("height"),
             "min_area_ha":round(float(exact.get("min_area_ha") or 0),3) if exact.get("min_area_ha") else None,
