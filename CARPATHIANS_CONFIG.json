@@ -1,6 +1,6 @@
 {
   "schema": "OEO_CARPATHIANS_UX4_CONFIG_V1",
-  "release": "UX4-RU-CARPATHIANS",
+  "release": "UX4.1-EVENT-FIRST",
   "region_label": "Українські Карпати",
   "presets": [
     {
@@ -69,7 +69,7 @@
       "id": "forest",
       "label": "Лес / вырубка / ветровал",
       "days": 30,
-      "base": "terrain",
+      "base": "esri",
       "s2_mode": "NBR",
       "sources": [
         "Sentinel-1",
@@ -108,7 +108,7 @@
       "id": "slope",
       "label": "Оползень / эрозия склона",
       "days": 30,
-      "base": "terrain",
+      "base": "topo",
       "s2_mode": "NDMI",
       "sources": [
         "Sentinel-1",
