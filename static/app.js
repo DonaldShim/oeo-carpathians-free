@@ -160,8 +160,8 @@ function findingVisible(e){
 }
 function deltaLabel(e){
  if(e.class==='direct')return '';
- const d=Number(e.delta_index||0);
- return `Δ${e.mode||'index'} ${d>=0?'+':''}${d.toFixed(3)}`;
+ const raw=Number(e.delta_index||0),res=Number(e.residual_delta??raw),base=Number(e.scene_baseline_delta||0);
+ return `локальный Δ${e.mode||'index'} ${res>=0?'+':''}${res.toFixed(3)} · фон ${base>=0?'+':''}${base.toFixed(3)}`;
 }
 function eventCard(e){
  const direct=e.class==='direct',idx=signalIndex(e);
@@ -174,7 +174,7 @@ function eventCard(e){
  const temporal=direct?'':`<div class="finding-temporal"><span>До <b>${esc(before)}</b></span><span>После <b>${esc(after)}</b></span></div>`;
  const why=direct
   ? 'Прямой тепловой сигнал FIRMS/VIIRS.'
-  : `Контур построен по изменившимся пикселям, а не по границе спутникового кадра. Индекс сигнала ${idx}/100 — внутренний score, не вероятность события.`;
+  : `Контур построен по cloud-masked пикселям после компенсации общего сезонного сдвига сцены. Индекс сигнала ${idx}/100 — внутренний score, не вероятность события.`;
  return `<div class="alert-card ${direct?'direct':'candidate'}" style="--event:${eventColor(e)}">
    <div class="alert-card-head"><span class="alert-class">${eventLabel(e)}</span><span class="alert-score">${direct?'THERMAL':'сигнал '+idx+'/100'}</span></div>
    <b>${esc(e.title||'Изменение')}</b>
