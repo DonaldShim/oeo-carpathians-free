@@ -263,11 +263,11 @@ def _candidate_tiles_for_bbox(bbox, z=12, max_cells=12):
     out=[(x,y) for y in sy for x in sx]
     return out[:max_cells]
 
-def _index_image(item_id: str, mode: str, z: int, x: int, y: int):
+def _index_image(item_id: str, mode: str, z: int, x: int, y: int, tilesize: int=256):
     mode=mode.upper()
     assets,expr,_=S2_MODE_SPEC[mode]
     with STACReader(_stac_item_url("sentinel-2-l2a",item_id)) as src:
-        return src.tile(x,y,z,assets=assets,expression=expr,tilesize=256)
+        return src.tile(x,y,z,assets=assets,expression=expr,tilesize=tilesize)
 
 def _scl_image(item_id: str, z: int, x: int, y: int):
     with STACReader(_stac_item_url("sentinel-2-l2a",item_id)) as src:
@@ -330,6 +330,28 @@ def _scenario_pixel_mask(scenario: str, delta, valid):
     if scenario=="flood":
         return valid & (delta > 0.12), "NDWI", "Рост NDWI: кандидат расширения воды/переувлажнения", 0.40
     return valid & (np.abs(delta) > 0.12), "NDMI", "Изменение NDMI: кандидат структурного изменения склона/влажности", 0.25
+
+def _coarse_change_sync(before_id: str, after_id: str, mode: str, scenario: str, z: int, x: int, y: int):
+    # Cheap discriminator only. Exact polygons are born later with SCL masking.
+    import numpy as np
+    a=_index_image(before_id,mode,z,x,y,tilesize=96)
+    b=_index_image(after_id,mode,z,x,y,tilesize=96)
+    av=np.asarray(a.data[0],dtype="float32")
+    bv=np.asarray(b.data[0],dtype="float32")
+    valid=(np.asarray(a.mask)>0) & (np.asarray(b.mask)>0) & np.isfinite(av) & np.isfinite(bv)
+    if valid.sum()<120:
+        return {"score":0.0,"valid_fraction":float(valid.mean())}
+    delta=np.full(av.shape,np.nan,dtype="float32")
+    delta[valid]=bv[valid]-av[valid]
+    mask,_,_,_=_scenario_pixel_mask(scenario,delta,valid)
+    frac=float(mask.sum()/max(1,valid.sum()))
+    if mask.any():
+        mag=float(np.mean(np.abs(delta[mask])))
+    else:
+        mag=0.0
+    # Rank only; not surfaced as evidence.
+    score=min(1.0, 0.68*min(1.0,frac/0.18) + 0.32*min(1.0,mag/0.25))
+    return {"score":float(score),"changed_fraction":frac,"magnitude":mag,"valid_fraction":float(valid.mean())}
 
 def _cell_change_sync(before_id: str, after_id: str, mode: str, scenario: str, z: int, x: int, y: int):
     import numpy as np
@@ -435,14 +457,25 @@ async def event_candidates(bbox: str, days: int=30, scenario: str="forest"):
     if before and after and before.get("id")!=after.get("id"):
         mode=_mode_for_scenario(scenario)
         cells=_candidate_tiles_for_bbox(b,12,12)
-        async def one(xy):
+        async def coarse_one(xy):
+            x,y=xy
+            try:
+                st=await asyncio.to_thread(_coarse_change_sync,before["id"],after["id"],mode,scenario,12,x,y)
+                return x,y,st
+            except Exception as e:
+                return x,y,{"score":0.0,"error":str(e)[:120]}
+        coarse_rows=await asyncio.gather(*(coarse_one(c) for c in cells))
+        coarse_rows.sort(key=lambda r:float((r[2] or {}).get("score",0.0)),reverse=True)
+        # Exact SCL + polygonization is reserved for the most informative cells.
+        refine_cells=[(x,y) for x,y,st in coarse_rows if float((st or {}).get("score",0.0))>0.03][:4]
+        async def refine_one(xy):
             x,y=xy
             try:
                 st=await asyncio.to_thread(_cell_change_sync,before["id"],after["id"],mode,scenario,12,x,y)
                 return x,y,st
             except Exception as e:
                 return x,y,{"error":str(e)[:160]}
-        rows=await asyncio.gather(*(one(c) for c in cells))
+        rows=await asyncio.gather(*(refine_one(c) for c in refine_cells)) if refine_cells else []
         polygon_count=0
         for x,y,st in rows:
             if not st or "error" in st:
@@ -476,8 +509,10 @@ async def event_candidates(bbox: str, days: int=30, scenario: str="forest"):
         events=events[:24]
         diagnostics.update({
             "before":before.get("datetime"),"after":after.get("datetime"),
-            "tested_cells":len(cells),"candidate_polygons":len(events),
-            "raw_polygons":polygon_count,"geometry":"cloud_masked_pixel_polygon","tile_zoom":12,"tile_pixels":256,"sampling":"uniform_aoi"
+            "tested_cells":len(cells),"coarse_cells":len(coarse_rows),"refined_cells":len(refine_cells),
+            "candidate_polygons":len(events),"raw_polygons":polygon_count,
+            "geometry":"cloud_masked_pixel_polygon","tile_zoom":12,"tile_pixels":256,
+            "sampling":"uniform_aoi_two_stage","coarse_pixels":96
         })
     else:
         diagnostics["reason"]="not enough comparable Sentinel-2 scenes"
@@ -510,6 +545,7 @@ async def event_candidates(bbox: str, days: int=30, scenario: str="forest"):
         "gfw_mode":"external-evidence",
         "diagnostics":diagnostics,
         "warning":"Candidate polygons are pixel-level screening signals, not confirmed incidents. signal_index is an internal signal score, not a calibrated probability. Direct FIRMS points are thermal alerts.",
+        "analysis_seconds":round(__import__("time").time()-_now,2),
         "cache_hit":False
     }
     _EVENT_CACHE[_key]=(_now,_result)
@@ -564,6 +600,10 @@ async def _boot_selftest():
             "direct_count":ev.get("direct_count"),
             "candidate_count":ev.get("candidate_count"),
             "tested_cells":(ev.get("diagnostics") or {}).get("tested_cells"),
+            "coarse_cells":(ev.get("diagnostics") or {}).get("coarse_cells"),
+            "refined_cells":(ev.get("diagnostics") or {}).get("refined_cells"),
+            "sampling":(ev.get("diagnostics") or {}).get("sampling"),
+            "analysis_seconds":ev.get("analysis_seconds"),
             "geometry":(ev.get("diagnostics") or {}).get("geometry"),
             "tile_pixels":(ev.get("diagnostics") or {}).get("tile_pixels"),
             "before":(ev.get("diagnostics") or {}).get("before"),
