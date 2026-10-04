@@ -234,23 +234,42 @@ def _tile_bounds(x: int, y: int, z: int):
     south=math.degrees(math.atan(math.sinh(math.pi*(1-2*(y+1)/n))))
     return [west,south,east,north]
 
-def _candidate_tiles_for_bbox(bbox, z=12, max_cells=9):
+def _candidate_tiles_for_bbox(bbox, z=12, max_cells=12):
     minlon,minlat,maxlon,maxlat=bbox
     xa,ya=_lonlat_tile(minlon,maxlat,z)
     xb,yb=_lonlat_tile(maxlon,minlat,z)
-    xs=range(min(xa,xb),max(xa,xb)+1)
-    ys=range(min(ya,yb),max(ya,yb)+1)
-    cx=(minlon+maxlon)/2; cy=(minlat+maxlat)/2
-    tx,ty=_lonlat_tile(cx,cy,z)
-    cells=[(x,y) for x in xs for y in ys]
-    cells.sort(key=lambda q:(q[0]-tx)**2+(q[1]-ty)**2)
-    return cells[:max_cells]
+    xs=list(range(min(xa,xb),max(xa,xb)+1))
+    ys=list(range(min(ya,yb),max(ya,yb)+1))
+    cells=[(x,y) for y in ys for x in xs]
+    if len(cells)<=max_cells:
+        return cells
+    # Uniform spatial sample over the full AOI, not only the centre.
+    import math
+    nx=max(1,min(len(xs),int(round(math.sqrt(max_cells*max(1,len(xs))/max(1,len(ys)))))))
+    ny=max(1,min(len(ys),max_cells//nx))
+    while nx*ny<max_cells and nx<len(xs):
+        nx+=1
+    while nx*ny<max_cells and ny<len(ys):
+        ny+=1
+    def picks(vals,n):
+        if n>=len(vals):
+            return vals
+        if n<=1:
+            return [vals[len(vals)//2]]
+        return [vals[round(i*(len(vals)-1)/(n-1))] for i in range(n)]
+    sx=picks(xs,nx); sy=picks(ys,ny)
+    out=[(x,y) for y in sy for x in sx]
+    return out[:max_cells]
 
 def _index_image(item_id: str, mode: str, z: int, x: int, y: int):
     mode=mode.upper()
     assets,expr,_=S2_MODE_SPEC[mode]
     with STACReader(_stac_item_url("sentinel-2-l2a",item_id)) as src:
         return src.tile(x,y,z,assets=assets,expression=expr,tilesize=256)
+
+def _scl_image(item_id: str, z: int, x: int, y: int):
+    with STACReader(_stac_item_url("sentinel-2-l2a",item_id)) as src:
+        return src.tile(x,y,z,assets=["scl"],tilesize=256)
 
 _GEOD = Geod(ellps="WGS84")
 
@@ -316,7 +335,25 @@ def _cell_change_sync(before_id: str, after_id: str, mode: str, scenario: str, z
     change_mask,metric,label,min_area_ha=_scenario_pixel_mask(scenario,delta,valid)
     changed=int(change_mask.sum())
     if changed<8:
-        return {"stats":{"valid_fraction":float(valid.mean()),"changed_fraction":0.0},"polygons":[]}
+        return {"stats":{"valid_fraction":float(valid.mean()),"changed_fraction":0.0,"cloud_masked":True},"polygons":[]}
+    # Refine only potential-change cells with local Sentinel-2 Scene Classification.
+    # Exclude no-data, saturated, cloud shadow, medium/high cloud, cirrus and snow/ice.
+    try:
+        sa=_scl_image(before_id,z,x,y)
+        sb=_scl_image(after_id,z,x,y)
+        ca=np.asarray(sa.data[0])
+        cb=np.asarray(sb.data[0])
+        bad=np.isin(ca,[0,1,3,8,9,10,11]) | np.isin(cb,[0,1,3,8,9,10,11])
+        valid=valid & (~bad)
+        delta=np.full(av.shape,np.nan,dtype="float32")
+        delta[valid]=bv[valid]-av[valid]
+        change_mask,metric,label,min_area_ha=_scenario_pixel_mask(scenario,delta,valid)
+        changed=int(change_mask.sum())
+        if changed<8:
+            return {"stats":{"valid_fraction":float(valid.mean()),"changed_fraction":0.0,"cloud_masked":True},"polygons":[]}
+    except Exception:
+        # Do not fabricate a cloud-free claim if SCL is unavailable.
+        return {"stats":{"valid_fraction":float(valid.mean()),"changed_fraction":0.0,"cloud_masked":False,"scl_error":True},"polygons":[]}
     changed_vals=delta[change_mask]
     stats={
         "median_delta":float(np.median(delta[valid])),
@@ -326,6 +363,7 @@ def _cell_change_sync(before_id: str, after_id: str, mode: str, scenario: str, z
         "changed_fraction":float(changed/valid.sum()),
         "valid_fraction":float(valid.mean()),
         "changed_pixels":changed,
+        "cloud_masked":True,
     }
     polys=[]
     for geom,val in shapes(change_mask.astype("uint8"),mask=change_mask,transform=a.transform):
@@ -354,7 +392,7 @@ def _mode_for_scenario(scenario: str):
     return {"forest":"NBR","fire":"NBR","flood":"NDWI","slope":"NDMI"}.get(scenario,"NBR")
 
 async def _pick_compare_scenes(bbox, days):
-    items=await _stac_search("sentinel-2-l2a",bbox,max(days,75),18,55)
+    items=await _stac_search("sentinel-2-l2a",bbox,max(days,75),18,45)
     if len(items)<2:
         return None,None,items
     after=items[0]
@@ -383,7 +421,7 @@ async def event_candidates(bbox: str, days: int=30, scenario: str="forest"):
     diagnostics={"scene_count":len(items),"mode":_mode_for_scenario(scenario)}
     if before and after and before.get("id")!=after.get("id"):
         mode=_mode_for_scenario(scenario)
-        cells=_candidate_tiles_for_bbox(b,12,9)
+        cells=_candidate_tiles_for_bbox(b,12,12)
         async def one(xy):
             x,y=xy
             try:
@@ -409,7 +447,7 @@ async def event_candidates(bbox: str, days: int=30, scenario: str="forest"):
                     "signal_index":idx,
                     "signal_label":"индекс сигнала, не вероятность",
                     "status":"CANDIDATE_REQUIRES_CONFIRMATION",
-                    "source":"Sentinel-2 pixel-level temporal index mask",
+                    "source":"Sentinel-2 cloud-masked pixel temporal index",
                     "mode":st.get("metric") or mode,
                     "before":{"id":before["id"],"datetime":before.get("datetime")},
                     "after":{"id":after["id"],"datetime":after.get("datetime")},
@@ -418,7 +456,7 @@ async def event_candidates(bbox: str, days: int=30, scenario: str="forest"):
                     "area_ha":round(area_ha,2),
                     "delta_index":round(float(stats.get("mean_changed_delta",0.0)),4),
                     "changed_fraction":round(float(stats.get("changed_fraction",0.0)),4),
-                    "analysis_geometry":"pixel_mask_polygon",
+                    "analysis_geometry":"cloud_masked_pixel_polygon",
                     "metrics":{k:round(v,4) if isinstance(v,float) else v for k,v in stats.items()}
                 })
         events.sort(key=lambda e:(e.get("signal_index",0),e.get("area_ha",0)),reverse=True)
@@ -426,7 +464,7 @@ async def event_candidates(bbox: str, days: int=30, scenario: str="forest"):
         diagnostics.update({
             "before":before.get("datetime"),"after":after.get("datetime"),
             "tested_cells":len(cells),"candidate_polygons":len(events),
-            "raw_polygons":polygon_count,"geometry":"pixel_mask_polygon","tile_zoom":12,"tile_pixels":256
+            "raw_polygons":polygon_count,"geometry":"cloud_masked_pixel_polygon","tile_zoom":12,"tile_pixels":256,"sampling":"uniform_aoi"
         })
     else:
         diagnostics["reason"]="not enough comparable Sentinel-2 scenes"
