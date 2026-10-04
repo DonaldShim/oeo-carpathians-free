@@ -21,6 +21,7 @@ ROOT = Path(__file__).parent
 STATIC = ROOT / 'static'
 CFG = json.loads((ROOT / 'CARPATHIANS_CONFIG.json').read_text(encoding='utf-8'))
 EARTH_SEARCH = 'https://earth-search.aws.element84.com/v1'
+_EVENT_CACHE = {}
 
 app = FastAPI(title='OEO Карпаты · Полесье 4.2 Free', version='4.2.0-free')
 app.mount('/static', StaticFiles(directory=STATIC), name='static')
