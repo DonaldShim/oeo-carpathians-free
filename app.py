@@ -1,17 +1,19 @@
-from fastapi import FastAPI, Query
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi import FastAPI, Query, HTTPException
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
 import os, json, asyncio
 import httpx
+from rio_tiler.io import STACReader
+from rio_tiler.colormap import cmap
 
 ROOT = Path(__file__).parent
 STATIC = ROOT / 'static'
 CFG = json.loads((ROOT / 'CARPATHIANS_CONFIG.json').read_text(encoding='utf-8'))
 EARTH_SEARCH = 'https://earth-search.aws.element84.com/v1'
 
-app = FastAPI(title='OEO Карпати · Полісся 3.1 Free', version='3.1.0-free')
+app = FastAPI(title='OEO Карпати · Полісся 3.1 Free', version='3.2.0-free')
 app.mount('/static', StaticFiles(directory=STATIC), name='static')
 
 @app.get('/')
@@ -21,7 +23,7 @@ async def root():
 @app.get('/health')
 async def health():
     return {
-        'monitor':'ok', 'version':'3.1.0-free', 'profile':'render-free',
+        'monitor':'ok', 'version':'3.2.0-free', 'profile':'render-free',
         'region':'Українські Карпати + Полісся', 'stac':True,
         'sentinel1':True, 'sentinel2':True, 'nisar':True,
         'firms_configured': bool(os.getenv('FIRMS_MAP_KEY')),
@@ -43,7 +45,7 @@ def _interval(days:int):
     return f"{start:%Y-%m-%dT%H:%M:%SZ}/{end:%Y-%m-%dT%H:%M:%SZ}"
 
 async def _stac_search(collection:str,bbox:list,days:int,limit:int,cloud_max=None):
-    body={'collections':[collection],'bbox':bbox,'datetime':_interval(days),'limit':limit}
+    body={'collections':[collection],'bbox':bbox,'datetime':_interval(days),'limit':limit,'sortby':[{'field':'properties.datetime','direction':'desc'}]}
     if cloud_max is not None:
         body['query']={'eo:cloud_cover':{'lte':cloud_max}}
     async with httpx.AsyncClient(timeout=30, follow_redirects=True) as c:
@@ -63,6 +65,7 @@ async def _stac_search(collection:str,bbox:list,days:int,limit:int,cloud_max=Non
             'visual':(assets.get('visual') or {}).get('href'),
             'vv':(assets.get('vv') or {}).get('href'),
             'vh':(assets.get('vh') or {}).get('href'),
+            'asset_keys':sorted(list(assets.keys())),
             'source':'Earth Search / Element 84'
         })
     return out
@@ -78,6 +81,57 @@ async def sentinel2(bbox:str,days:int=30,max_results:int=12,cloud_max:int=40):
     b=_bbox(bbox)
     items=await _stac_search('sentinel-2-l2a',b,days,max_results,cloud_max)
     return {'ok':True,'provider':'Earth Search','mission':'Sentinel-2','results':items,'count':len(items)}
+
+
+# OEO_RASTER_TILES_V32
+def _stac_item_url(collection: str, item_id: str):
+    return f"{EARTH_SEARCH}/collections/{collection}/items/{item_id}"
+
+S2_MODE_SPEC = {
+    "RGB": (["visual"], None, None),
+    "NDVI": (["nir", "red"], "(b1-b2)/(b1+b2)", (-1.0, 1.0)),
+    "NDWI": (["green", "nir"], "(b1-b2)/(b1+b2)", (-1.0, 1.0)),
+    "MNDWI": (["green", "swir16"], "(b1-b2)/(b1+b2)", (-1.0, 1.0)),
+    "NDMI": (["nir", "swir16"], "(b1-b2)/(b1+b2)", (-1.0, 1.0)),
+    "NBR": (["nir", "swir22"], "(b1-b2)/(b1+b2)", (-1.0, 1.0)),
+}
+
+def _s2_tile_sync(item_id: str, mode: str, z: int, x: int, y: int):
+    mode = mode.upper()
+    if mode not in S2_MODE_SPEC:
+        raise ValueError(f"unsupported mode: {mode}")
+    assets, expr, rng = S2_MODE_SPEC[mode]
+    with STACReader(_stac_item_url("sentinel-2-l2a", item_id)) as src:
+        if mode == "RGB":
+            img = src.tile(x, y, z, assets=[{"name":"visual","indexes":[1,2,3]}], tilesize=256)
+            return img.render(img_format="PNG")
+        img = src.tile(x, y, z, assets=assets, expression=expr, tilesize=256)
+        img.rescale(in_range=(rng,))
+        return img.render(img_format="PNG", colormap=cmap.get("viridis"))
+
+def _s1_tile_sync(item_id: str, pol: str, z: int, x: int, y: int):
+    pol = pol.lower()
+    if pol not in {"vv","vh","hh","hv"}:
+        raise ValueError("unsupported polarization")
+    with STACReader(_stac_item_url("sentinel-1-grd", item_id)) as src:
+        img = src.tile(x, y, z, assets=[pol], tilesize=256)
+        return img.render(img_format="PNG")
+
+@app.get('/api/v3/sentinel2/tile/{item_id}/{mode}/{z}/{x}/{y}.png')
+async def sentinel2_tile(item_id: str, mode: str, z: int, x: int, y: int):
+    try:
+        content = await asyncio.to_thread(_s2_tile_sync, item_id, mode, z, x, y)
+        return Response(content=content, media_type="image/png", headers={"Cache-Control":"public, max-age=86400"})
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Sentinel-2 tile error: {str(e)[:220]}")
+
+@app.get('/api/v3/sentinel1/tile/{item_id}/{pol}/{z}/{x}/{y}.png')
+async def sentinel1_tile(item_id: str, pol: str, z: int, x: int, y: int):
+    try:
+        content = await asyncio.to_thread(_s1_tile_sync, item_id, pol, z, x, y)
+        return Response(content=content, media_type="image/png", headers={"Cache-Control":"public, max-age=86400"})
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Sentinel-1 tile error: {str(e)[:220]}")
 
 @app.get('/api/v3/nisar/search')
 async def nisar(bbox:str,days:int=60,max_results:int=12):
