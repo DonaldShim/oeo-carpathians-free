@@ -414,6 +414,19 @@ async def _boot_selftest():
         result["firms"]={"ok":fr.get("ok"),"configured":fr.get("configured"),"count":fr.get("count")}
     except Exception as e:
         result["firms"]={"ok":False,"error":str(e)[:180]}
+    try:
+        ev=await event_candidates(bbox=bbox,days=30,scenario="forest")
+        result["event_engine"]={
+            "ok":ev.get("ok"),
+            "count":ev.get("count"),
+            "direct_count":ev.get("direct_count"),
+            "candidate_count":ev.get("candidate_count"),
+            "tested_cells":(ev.get("diagnostics") or {}).get("tested_cells"),
+            "before":(ev.get("diagnostics") or {}).get("before"),
+            "after":(ev.get("diagnostics") or {}).get("after")
+        }
+    except Exception as e:
+        result["event_engine"]={"ok":False,"error":str(e)[:220]}
 
     # Real raster proof: render one RGB, one NBR, and one SAR tile from returned scenes.
     try:
