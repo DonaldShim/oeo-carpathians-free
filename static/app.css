@@ -98,3 +98,5 @@ label{user-select:none}
 .alert-actions button:first-child{background:#12372b}
 .map-legend{font-size:9px;backdrop-filter:blur(5px)}
 .layer-badge{max-width:55%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+.analysis-meta{margin:-2px 0 8px;padding:6px 8px;border-radius:7px;background:#081913;border:1px dashed #285143;color:#86aa9c;font-size:8px}.analysis-meta b{color:#d9f5e9}
