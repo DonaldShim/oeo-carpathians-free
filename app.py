@@ -22,7 +22,7 @@ STATIC = ROOT / 'static'
 CFG = json.loads((ROOT / 'CARPATHIANS_CONFIG.json').read_text(encoding='utf-8'))
 EARTH_SEARCH = 'https://earth-search.aws.element84.com/v1'
 
-app = FastAPI(title='OEO Карпати · Полісся 3.1 Free', version='4.2.0-free')
+app = FastAPI(title='OEO Карпаты · Полесье 4.2 Free', version='4.2.0-free')
 app.mount('/static', StaticFiles(directory=STATIC), name='static')
 
 @app.get('/')
@@ -204,7 +204,7 @@ async def activity_scan(bbox:str,days:int=30):
       'ok':True,'status':'NO_CONFIRMED_EVENT','evidence_readiness':{'level':'HIGH' if signals>=3 else 'MEDIUM' if signals>=2 else 'LOW','signals':signals,'of':4},
       'summary':{'sentinel1':len(s1),'sentinel2':len(s2),'nisar':nisar_data.get('count',0),'firms':firms_data.get('count',0)},
       'latest':{'sentinel1':s1[:5],'sentinel2':s2[:5],'nisar':nisar_data.get('results',[])[:5],'firms':firms_data.get('features',[])[:10]},
-      'interpretation':'Свіжі дані знайдені. NO_CONFIRMED_EVENT означає, що сам факт нових сцен не є підтвердженим природним або антропогенним событием.'
+      'interpretation':'Свежие данные найдены. Сам факт появления новых сцен не считается подтверждённым природным или антропогенным событием.'
     }
 
 
@@ -505,17 +505,39 @@ async def _boot_selftest():
         result["firms"]={"ok":False,"error":str(e)[:180]}
     try:
         ev=await event_candidates(bbox=bbox,days=30,scenario="forest")
+        candidates=[e for e in (ev.get("events") or []) if e.get("class")=="candidate"]
+        top=candidates[0] if candidates else {}
         result["event_engine"]={
             "ok":ev.get("ok"),
             "count":ev.get("count"),
             "direct_count":ev.get("direct_count"),
             "candidate_count":ev.get("candidate_count"),
             "tested_cells":(ev.get("diagnostics") or {}).get("tested_cells"),
+            "geometry":(ev.get("diagnostics") or {}).get("geometry"),
+            "tile_pixels":(ev.get("diagnostics") or {}).get("tile_pixels"),
             "before":(ev.get("diagnostics") or {}).get("before"),
-            "after":(ev.get("diagnostics") or {}).get("after")
+            "after":(ev.get("diagnostics") or {}).get("after"),
+            "top_signal_index":top.get("signal_index"),
+            "top_area_ha":top.get("area_ha"),
+            "top_delta_index":top.get("delta_index"),
+            "top_geometry_type":(top.get("geometry") or {}).get("type"),
+            "legacy_confidence_present":"confidence" in top if top else False
         }
     except Exception as e:
         result["event_engine"]={"ok":False,"error":str(e)[:220]}
+
+    try:
+        html=(STATIC/"index.html").read_text(encoding="utf-8")
+        js=(STATIC/"app.js").read_text(encoding="utf-8")
+        result["ui_contract"]={
+            "v42_brand":"Полесье 4.2" in html,
+            "footprints_default_off":'id="footprints"' in html and 'id="footprints" checked' not in html,
+            "finding_filters":'id="signalMin"' in html and 'id="findingType"' in html,
+            "demo_case":'id="demoCase"' in html,
+            "signal_index_ui":"signal_index" in js and "confidence||0" not in js
+        }
+    except Exception as e:
+        result["ui_contract"]={"ok":False,"error":str(e)[:180]}
 
     # Real raster proof: render one RGB, one NBR, and one SAR tile from returned scenes.
     try:
