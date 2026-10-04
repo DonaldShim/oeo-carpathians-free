@@ -141,7 +141,8 @@ async def nisar(bbox:str,days:int=60,max_results:int=12):
         wkt=f"POLYGON(({b[0]} {b[1]},{b[2]} {b[1]},{b[2]} {b[3]},{b[0]} {b[3]},{b[0]} {b[1]}))"
         end=datetime.now(timezone.utc)
         start=end-timedelta(days=days)
-        results=await asyncio.to_thread(asf.search, dataset='NISAR', processingLevel='GCOV', dataMaturity='PROVISIONAL', intersectsWith=wkt, start=start, end=end, maxResults=max_results)
+        maturity=getattr(getattr(asf.constants,'MATURITIES',None),'PROVISIONAL','PROVISIONAL')
+        results=await asyncio.to_thread(asf.search, dataset='NISAR', processingLevel='GCOV', dataMaturity=maturity, intersectsWith=wkt, start=start, end=end, maxResults=max_results)
         out=[]
         for x in results:
             d=x.geojson() if hasattr(x,'geojson') else {}
@@ -197,18 +198,29 @@ async def activity_scan(bbox:str,days:int=30):
       'interpretation':'Свіжі дані знайдені. NO_CONFIRMED_EVENT означає, що сам факт нових сцен не є підтвердженим природним або антропогенним событием.'
     }
 
-# OEO_RENDER_BOOT_SELFTEST_V1
+# OEO_RENDER_BOOT_SELFTEST_V2
+def _tile_xyz(lon: float, lat: float, z: int):
+    import math
+    n=2**z
+    x=int((lon+180.0)/360.0*n)
+    lat_rad=math.radians(lat)
+    y=int((1.0-math.asinh(math.tan(lat_rad))/math.pi)/2.0*n)
+    return x,y,z
+
 async def _boot_selftest():
     await asyncio.sleep(2)
     bbox="24.35,48.02,24.90,48.35"
     result={"bbox":bbox}
+    s1_items=[]; s2_items=[]
     try:
         s1=await sentinel1(bbox=bbox,days=30,max_results=4)
+        s1_items=s1.get("results") or []
         result["sentinel1"]={"ok":s1.get("ok"),"count":s1.get("count")}
     except Exception as e:
         result["sentinel1"]={"ok":False,"error":str(e)[:180]}
     try:
         s2=await sentinel2(bbox=bbox,days=30,max_results=4,cloud_max=60)
+        s2_items=s2.get("results") or []
         result["sentinel2"]={"ok":s2.get("ok"),"count":s2.get("count")}
     except Exception as e:
         result["sentinel2"]={"ok":False,"error":str(e)[:180]}
@@ -222,6 +234,34 @@ async def _boot_selftest():
         result["firms"]={"ok":fr.get("ok"),"configured":fr.get("configured"),"count":fr.get("count")}
     except Exception as e:
         result["firms"]={"ok":False,"error":str(e)[:180]}
+
+    # Real raster proof: render one RGB, one NBR, and one SAR tile from returned scenes.
+    try:
+        if s2_items:
+            q=s2_items[0]
+            bb=q.get("bbox") or [24.35,48.02,24.90,48.35]
+            lon=(bb[0]+bb[2])/2; lat=(bb[1]+bb[3])/2
+            x,y,z=_tile_xyz(lon,lat,10)
+            rgb=await asyncio.to_thread(_s2_tile_sync,q["id"],"RGB",z,x,y)
+            nbr=await asyncio.to_thread(_s2_tile_sync,q["id"],"NBR",z,x,y)
+            result["s2_tiles"]={"ok":True,"rgb_bytes":len(rgb),"nbr_bytes":len(nbr),"zxy":[z,x,y]}
+        else:
+            result["s2_tiles"]={"ok":False,"reason":"no scene"}
+    except Exception as e:
+        result["s2_tiles"]={"ok":False,"error":str(e)[:220]}
+    try:
+        if s1_items:
+            q=s1_items[0]
+            bb=q.get("bbox") or [24.35,48.02,24.90,48.35]
+            lon=(bb[0]+bb[2])/2; lat=(bb[1]+bb[3])/2
+            x,y,z=_tile_xyz(lon,lat,10)
+            sar=await asyncio.to_thread(_s1_tile_sync,q["id"],"vv",z,x,y)
+            result["s1_tile"]={"ok":True,"bytes":len(sar),"zxy":[z,x,y]}
+        else:
+            result["s1_tile"]={"ok":False,"reason":"no scene"}
+    except Exception as e:
+        result["s1_tile"]={"ok":False,"error":str(e)[:220]}
+
     print("OEO_BOOT_SELFTEST "+json.dumps(result,ensure_ascii=False),flush=True)
 
 @app.on_event("startup")
