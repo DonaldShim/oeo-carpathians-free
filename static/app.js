@@ -200,7 +200,7 @@ function renderEventList(){
  const configured=!!state.alertMeta?.firms_configured;
  const d=state.alertMeta?.diagnostics||{};
  const perf=state.alertMeta?.analysis_seconds!=null
-   ? `<div class="analysis-meta">Анализ: <b>${state.alertMeta.analysis_seconds} с</b> · быстрый просмотр ${d.coarse_cells??d.tested_cells??'—'} ячеек → точная SCL-детализация ${d.refined_cells??'—'}</div>`
+   ? `<div class="analysis-meta">Анализ: <b>${state.alertMeta.analysis_seconds} с</b> · ${d.strategy==='whole_aoi_part'?'единый AOI-растр':'fallback: выборочная детализация'}${d.analysis_resolution_m?' · ≈ '+d.analysis_resolution_m+' м/пиксель':''}${d.strategy!=='whole_aoi_part'?' · coarse '+(d.coarse_cells??'—')+' → refine '+(d.refined_cells??'—'):''}</div>`
    : '';
  const sourceHtml=`<div class="source-strip">
    <span class="src on">Pixel-change engine: ON</span>
