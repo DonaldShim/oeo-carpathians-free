@@ -4,6 +4,12 @@ from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
 import os, json, asyncio
+# OEO_PUBLIC_S3_ANON_V1
+# Earth Search COGs are public. Prevent GDAL/rasterio from probing EC2 metadata.
+os.environ.setdefault("AWS_NO_SIGN_REQUEST","YES")
+os.environ.setdefault("AWS_EC2_METADATA_DISABLED","TRUE")
+os.environ.setdefault("AWS_REGION","us-west-2")
+os.environ.setdefault("AWS_DEFAULT_REGION","us-west-2")
 import httpx
 from rio_tiler.io import STACReader
 from rio_tiler.colormap import cmap
