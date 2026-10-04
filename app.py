@@ -15,6 +15,7 @@ from rio_tiler.io import STACReader
 from rio_tiler.colormap import cmap
 from rasterio.features import shapes
 from rasterio.warp import transform_geom
+from rasterio.transform import from_bounds
 from pyproj import Geod
 
 ROOT = Path(__file__).parent
@@ -295,6 +296,16 @@ def _geodesic_area_ha(geom: dict):
         return max(0.0,total)/10000.0
     return 0.0
 
+def _wm_tile_transform(x: int, y: int, z: int, width: int, height: int):
+    # Exact slippy-map tile extent in EPSG:3857.
+    origin=20037508.342789244
+    span=(2.0*origin)/(2**z)
+    minx=-origin+x*span
+    maxx=minx+span
+    maxy=origin-y*span
+    miny=maxy-span
+    return from_bounds(minx,miny,maxx,maxy,width,height)
+
 def _geom_bbox(geom: dict):
     pts=[]
     def walk(v):
@@ -367,11 +378,12 @@ def _cell_change_sync(before_id: str, after_id: str, mode: str, scenario: str, z
         "cloud_masked":True,
     }
     polys=[]
-    for geom,val in shapes(change_mask.astype("uint8"),mask=change_mask,transform=a.transform):
+    px_transform=_wm_tile_transform(x,y,z,change_mask.shape[1],change_mask.shape[0])
+    for geom,val in shapes(change_mask.astype("uint8"),mask=change_mask,transform=px_transform):
         if int(val)!=1:
             continue
         try:
-            wgs=transform_geom(str(a.crs),"EPSG:4326",geom,precision=6)
+            wgs=transform_geom("EPSG:3857","EPSG:4326",geom,precision=6)
             area_ha=_geodesic_area_ha(wgs)
             if area_ha<min_area_ha:
                 continue
