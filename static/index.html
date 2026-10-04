@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>OEO Карпати · Полісся 3.1</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="/static/app.css?v=311free1">
+</head>
+<body>
+<header><div><b>OEO Карпати · Полісся 3.1</b><small>безкоштовний моніторинг відкритих супутникових даних</small></div><div class="status"><span id="sysDot"></span><span id="sysText">перевірка…</span><button id="refresh">Оновити</button></div></header>
+<div class="layout">
+<aside class="left">
+  <section><h3>1 · Район</h3><select id="preset"></select><button id="usePreset">Показати район</button><div class="hint" id="aoiLabel">Оберіть район або намалюйте прямокутник на карті.</div></section>
+  <section><h3>2 · Сценарій</h3><div id="scenarios" class="grid"></div><div class="hint" id="scenarioHelp"></div></section>
+  <section><h3>3 · Період</h3><select id="days"><option>7</option><option>14</option><option selected>30</option><option>60</option><option>90</option></select><button class="primary" id="scan">Перевірити ділянку</button></section>
+  <section><h3>4 · Шари</h3><select id="base"><option value="hybrid">EOX Hybrid</option><option value="terrain" selected>EOX Terrain</option><option value="osm">OpenStreetMap</option></select><label><input type="checkbox" id="footprints" checked> контури нових сцен</label></section>
+  <section><h3>Що шукати в Карпатах</h3><div class="hint">Ліс/вітровал → SAR + NBR · Паводок → SAR + NDWI · Пожежа → FIRMS + NBR · Зсув → SAR/NISAR + NDMI.</div></section>
+</aside>
+<main><div id="map"></div><div class="mapnote">Пресети — оперативні області пошуку, не адміністративні межі.</div></main>
+<aside class="right">
+ <div class="tabs"><button class="tab active" data-tab="summary">Зведення</button><button class="tab" data-tab="alerts">Алерти</button><button class="tab" data-tab="data">Нові дані</button><button class="tab" data-tab="sensors">Сенсори</button></div>
+ <section id="summary" class="tabbody active"><div id="event" class="event waiting"><b>Очікує перевірки</b><span>Оберіть район і натисніть «Перевірити ділянку».</span></div><div class="metrics"><div><span>Готовність</span><b id="ready">—</b></div><div><span>Sentinel‑1</span><b id="s1">—</b></div><div><span>Sentinel‑2</span><b id="s2">—</b></div><div><span>NISAR</span><b id="nisar">—</b></div><div><span>FIRMS</span><b id="firms">—</b></div></div><div class="explain" id="explain">Нові сцени ≠ підтверджена подія. OEO відокремлює наявність нових даних від факту зміни.</div></section>
+ <section id="alerts" class="tabbody"><div id="alertList" class="feed empty">Підтверджених алертів ще немає.</div></section>
+ <section id="data" class="tabbody"><div id="dataList" class="feed empty">Після перевірки тут з’являться нові Sentinel‑1 / Sentinel‑2 / NISAR дані.</div></section>
+ <section id="sensors" class="tabbody"><div id="sensorList" class="feed"></div></section>
+</aside>
+</div>
+<div id="toast"></div>
+<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="/static/app.js?v=311free1"></script>
+</body></html>
