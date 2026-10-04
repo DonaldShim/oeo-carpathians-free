@@ -529,7 +529,7 @@ def _tile_xyz(lon: float, lat: float, z: int):
 
 async def _boot_selftest():
     await asyncio.sleep(2)
-    bbox="24.35,48.02,24.90,48.35"
+    bbox="24.52,48.10,24.70,48.24"
     result={"bbox":bbox}
     s1_items=[]; s2_items=[]
     try:
