@@ -415,6 +415,108 @@ def _cell_change_sync(before_id: str, after_id: str, mode: str, scenario: str, z
     polys.sort(key=lambda p:p["area_ha"],reverse=True)
     return {"stats":stats,"polygons":polys[:8],"metric":metric,"label":label}
 
+def _analysis_shape(bbox, max_dim=1024):
+    import math
+    minlon,minlat,maxlon,maxlat=bbox
+    lat_km=max(0.1,(maxlat-minlat)*111.32)
+    lon_km=max(0.1,(maxlon-minlon)*111.32*max(0.15,math.cos(math.radians((minlat+maxlat)/2))))
+    if lon_km>=lat_km:
+        width=max_dim
+        height=max(128,int(round(max_dim*lat_km/lon_km)))
+        res_m=lon_km*1000/width
+    else:
+        height=max_dim
+        width=max(128,int(round(max_dim*lon_km/lat_km)))
+        res_m=lat_km*1000/height
+    return width,height,float(res_m)
+
+def _index_part(item_id: str, mode: str, bbox, width: int, height: int):
+    mode=mode.upper()
+    assets,expr,_=S2_MODE_SPEC[mode]
+    with STACReader(_stac_item_url("sentinel-2-l2a",item_id)) as src:
+        return src.part(
+            tuple(bbox), assets=assets, expression=expr,
+            width=width, height=height,
+            bounds_crs="EPSG:4326", dst_crs="EPSG:4326",
+            resampling_method="bilinear", reproject_method="bilinear"
+        )
+
+def _scl_part(item_id: str, bbox, width: int, height: int):
+    with STACReader(_stac_item_url("sentinel-2-l2a",item_id)) as src:
+        return src.part(
+            tuple(bbox), assets=["scl"],
+            width=width, height=height,
+            bounds_crs="EPSG:4326", dst_crs="EPSG:4326",
+            resampling_method="nearest", reproject_method="nearest"
+        )
+
+def _despeckle(mask):
+    import numpy as np
+    m=mask.astype("uint8")
+    p=np.pad(m,1,mode="constant")
+    n=np.zeros_like(m,dtype="uint8")
+    for dy in range(3):
+        for dx in range(3):
+            n += p[dy:dy+m.shape[0],dx:dx+m.shape[1]]
+    return mask & (n>=3)
+
+def _aoi_change_sync(before_id: str, after_id: str, mode: str, scenario: str, bbox):
+    import numpy as np
+    width,height,res_m=_analysis_shape(bbox,1024)
+    a=_index_part(before_id,mode,bbox,width,height)
+    b=_index_part(after_id,mode,bbox,width,height)
+    sa=_scl_part(before_id,bbox,width,height)
+    sb=_scl_part(after_id,bbox,width,height)
+
+    av=np.asarray(a.data[0],dtype="float32")
+    bv=np.asarray(b.data[0],dtype="float32")
+    ca=np.asarray(sa.data[0])
+    cb=np.asarray(sb.data[0])
+    valid=(np.asarray(a.mask)>0) & (np.asarray(b.mask)>0) & np.isfinite(av) & np.isfinite(bv)
+    bad=np.isin(ca,[0,1,3,8,9,10,11]) | np.isin(cb,[0,1,3,8,9,10,11])
+    valid &= ~bad
+    if valid.sum()<1000:
+        return {"stats":{"valid_fraction":float(valid.mean()),"cloud_masked":True},"polygons":[],"resolution_m":res_m,"width":width,"height":height}
+
+    delta=np.full(av.shape,np.nan,dtype="float32")
+    delta[valid]=bv[valid]-av[valid]
+    change_mask,metric,label,min_area_ha=_scenario_pixel_mask(scenario,delta,valid)
+    change_mask=_despeckle(change_mask)
+    changed=int(change_mask.sum())
+    if changed<8:
+        return {"stats":{"valid_fraction":float(valid.mean()),"changed_fraction":0.0,"cloud_masked":True},"polygons":[],"resolution_m":res_m,"width":width,"height":height}
+
+    changed_vals=delta[change_mask]
+    stats={
+        "median_delta":float(np.median(delta[valid])),
+        "mean_delta":float(np.mean(delta[valid])),
+        "mean_changed_delta":float(np.mean(changed_vals)),
+        "median_changed_delta":float(np.median(changed_vals)),
+        "changed_fraction":float(changed/max(1,valid.sum())),
+        "valid_fraction":float(valid.mean()),
+        "changed_pixels":changed,
+        "cloud_masked":True,
+    }
+    # Require at least ~3 analysis pixels in addition to scenario-specific physical minimum.
+    min_area_ha=max(float(min_area_ha),3.0*(res_m*res_m)/10000.0)
+    transform=from_bounds(bbox[0],bbox[1],bbox[2],bbox[3],width,height)
+    polys=[]
+    for geom,val in shapes(change_mask.astype("uint8"),mask=change_mask,transform=transform):
+        if int(val)!=1:
+            continue
+        try:
+            area_ha=_geodesic_area_ha(geom)
+            if area_ha<min_area_ha:
+                continue
+            polys.append({"geometry":geom,"bbox":_geom_bbox(geom),"area_ha":float(area_ha)})
+        except Exception:
+            continue
+    polys.sort(key=lambda p:p["area_ha"],reverse=True)
+    return {
+        "stats":stats,"polygons":polys[:48],"metric":metric,"label":label,
+        "resolution_m":res_m,"width":width,"height":height,"min_area_ha":min_area_ha
+    }
+
 def _signal_index(scenario: str, stats: dict, area_ha: float):
     d=abs(float(stats.get("mean_changed_delta",0.0)))
     frac=float(stats.get("changed_fraction",0.0))
@@ -456,26 +558,36 @@ async def event_candidates(bbox: str, days: int=30, scenario: str="forest"):
     diagnostics={"scene_count":len(items),"mode":_mode_for_scenario(scenario)}
     if before and after and before.get("id")!=after.get("id"):
         mode=_mode_for_scenario(scenario)
-        cells=_candidate_tiles_for_bbox(b,12,12)
-        async def coarse_one(xy):
-            x,y=xy
-            try:
-                st=await asyncio.to_thread(_coarse_change_sync,before["id"],after["id"],mode,scenario,12,x,y)
-                return x,y,st
-            except Exception as e:
-                return x,y,{"score":0.0,"error":str(e)[:120]}
-        coarse_rows=await asyncio.gather(*(coarse_one(c) for c in cells))
-        coarse_rows.sort(key=lambda r:float((r[2] or {}).get("score",0.0)),reverse=True)
-        # Exact SCL + polygonization is reserved for the most informative cells.
-        refine_cells=[(x,y) for x,y,st in coarse_rows if float((st or {}).get("score",0.0))>0.03][:4]
-        async def refine_one(xy):
-            x,y=xy
-            try:
-                st=await asyncio.to_thread(_cell_change_sync,before["id"],after["id"],mode,scenario,12,x,y)
-                return x,y,st
-            except Exception as e:
-                return x,y,{"error":str(e)[:160]}
-        rows=await asyncio.gather(*(refine_one(c) for c in refine_cells)) if refine_cells else []
+        strategy="whole_aoi_part"
+        try:
+            exact=await asyncio.to_thread(_aoi_change_sync,before["id"],after["id"],mode,scenario,b)
+            rows=[("aoi","aoi",exact)]
+            coarse_rows=[]; refine_cells=[]
+        except Exception as whole_err:
+            # Certified fallback: older tiled path, still cloud-masked and georeferenced.
+            strategy="two_stage_tile_fallback"
+            cells=_candidate_tiles_for_bbox(b,12,12)
+            async def coarse_one(xy):
+                x,y=xy
+                try:
+                    st=await asyncio.to_thread(_coarse_change_sync,before["id"],after["id"],mode,scenario,12,x,y)
+                    return x,y,st
+                except Exception as e:
+                    return x,y,{"score":0.0,"error":str(e)[:120]}
+            coarse_rows=await asyncio.gather(*(coarse_one(c) for c in cells))
+            coarse_rows.sort(key=lambda r:float((r[2] or {}).get("score",0.0)),reverse=True)
+            refine_cells=[(x,y) for x,y,st in coarse_rows if float((st or {}).get("score",0.0))>0.03][:3]
+            async def refine_one(xy):
+                x,y=xy
+                try:
+                    st=await asyncio.to_thread(_cell_change_sync,before["id"],after["id"],mode,scenario,12,x,y)
+                    return x,y,st
+                except Exception as e:
+                    return x,y,{"error":str(e)[:160]}
+            rows=await asyncio.gather(*(refine_one(c) for c in refine_cells)) if refine_cells else []
+            exact={"resolution_m":None,"width":None,"height":None,"min_area_ha":None}
+            diagnostics["whole_aoi_error"]=str(whole_err)[:180]
+
         polygon_count=0
         for x,y,st in rows:
             if not st or "error" in st:
@@ -486,14 +598,14 @@ async def event_candidates(bbox: str, days: int=30, scenario: str="forest"):
                 area_ha=float(p.get("area_ha") or 0.0)
                 idx=_signal_index(scenario,stats,area_ha)
                 events.append({
-                    "id":f"cand-{scenario}-12-{x}-{y}-{j}",
+                    "id":f"cand-{scenario}-{strategy}-{j}",
                     "class":"candidate",
                     "scenario":scenario,
                     "title":st.get("label") or "Кандидат изменения",
                     "signal_index":idx,
                     "signal_label":"индекс сигнала, не вероятность",
                     "status":"CANDIDATE_REQUIRES_CONFIRMATION",
-                    "source":"Sentinel-2 cloud-masked pixel temporal index",
+                    "source":"Sentinel-2 cloud-masked whole-AOI temporal index" if strategy=="whole_aoi_part" else "Sentinel-2 cloud-masked pixel temporal index",
                     "mode":st.get("metric") or mode,
                     "before":{"id":before["id"],"datetime":before.get("datetime")},
                     "after":{"id":after["id"],"datetime":after.get("datetime")},
@@ -503,16 +615,21 @@ async def event_candidates(bbox: str, days: int=30, scenario: str="forest"):
                     "delta_index":round(float(stats.get("mean_changed_delta",0.0)),4),
                     "changed_fraction":round(float(stats.get("changed_fraction",0.0)),4),
                     "analysis_geometry":"cloud_masked_pixel_polygon",
+                    "analysis_resolution_m":round(float(st.get("resolution_m") or 0),1) if st.get("resolution_m") else None,
                     "metrics":{k:round(v,4) if isinstance(v,float) else v for k,v in stats.items()}
                 })
         events.sort(key=lambda e:(e.get("signal_index",0),e.get("area_ha",0)),reverse=True)
         events=events[:24]
         diagnostics.update({
             "before":before.get("datetime"),"after":after.get("datetime"),
-            "tested_cells":len(cells),"coarse_cells":len(coarse_rows),"refined_cells":len(refine_cells),
+            "strategy":strategy,
             "candidate_polygons":len(events),"raw_polygons":polygon_count,
-            "geometry":"cloud_masked_pixel_polygon","tile_zoom":12,"tile_pixels":256,
-            "sampling":"uniform_aoi_two_stage","coarse_pixels":96
+            "geometry":"cloud_masked_pixel_polygon",
+            "sampling":"whole_aoi_contiguous" if strategy=="whole_aoi_part" else "uniform_aoi_two_stage",
+            "analysis_resolution_m":round(float(exact.get("resolution_m") or 0),1) if exact.get("resolution_m") else None,
+            "raster_width":exact.get("width"),"raster_height":exact.get("height"),
+            "min_area_ha":round(float(exact.get("min_area_ha") or 0),3) if exact.get("min_area_ha") else None,
+            "coarse_cells":len(coarse_rows),"refined_cells":len(refine_cells)
         })
     else:
         diagnostics["reason"]="not enough comparable Sentinel-2 scenes"
@@ -603,6 +720,8 @@ async def _boot_selftest():
             "coarse_cells":(ev.get("diagnostics") or {}).get("coarse_cells"),
             "refined_cells":(ev.get("diagnostics") or {}).get("refined_cells"),
             "sampling":(ev.get("diagnostics") or {}).get("sampling"),
+            "strategy":(ev.get("diagnostics") or {}).get("strategy"),
+            "analysis_resolution_m":(ev.get("diagnostics") or {}).get("analysis_resolution_m"),
             "analysis_seconds":ev.get("analysis_seconds"),
             "geometry":(ev.get("diagnostics") or {}).get("geometry"),
             "tile_pixels":(ev.get("diagnostics") or {}).get("tile_pixels"),
