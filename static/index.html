@@ -3,15 +3,15 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>OEO Карпаты · Полесье 4.1</title>
+<title>OEO Карпаты · Полесье 4.2</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet-draw@1.0.4/dist/leaflet.draw.css">
-<link rel="stylesheet" href="/static/app.css?v=410-event-first">
+<link rel="stylesheet" href="/static/app.css?v=420-product">
 </head>
 <body>
 <header class="topbar">
   <div class="brand">
-    <div class="brand-main">OEO <strong>Карпаты · Полесье 3.2</strong></div>
+    <div class="brand-main">OEO <strong>Карпаты · Полесье 4.2</strong></div>
     <div class="brand-sub">мониторинг изменений по открытым спутниковым данным</div>
   </div>
   <div class="top-status">
@@ -30,6 +30,7 @@
     <div class="step"><span>1</span><div><b>Выберите участок</b><small>Карпатский пресет или точная область на карте</small></div></div>
     <select id="preset"></select>
     <button id="usePreset" class="primary soft">Показать выбранный район</button>
+    <button id="demoCase" class="demo-btn">▶ Демо: найти изменения в Чорногоре</button>
     <div class="button-grid three">
       <button id="drawRect">▭ Прямоугольник</button>
       <button id="drawPoly">⬡ Полигон</button>
@@ -69,7 +70,8 @@
       <option value="osm">OpenStreetMap</option>
       <option value="topo">OpenTopoMap</option>
     </select>
-    <label class="switch-row"><input type="checkbox" id="footprints" checked><span>Контуры новых сцен</span></label>
+    <label class="switch-row"><input type="checkbox" id="footprints"><span>Показать границы спутниковых кадров</span></label>
+    <label class="switch-row"><input type="checkbox" id="eventLayer" checked><span>Показывать находки на карте</span></label>
     <div class="button-grid">
       <button id="openGfw">GFW лесные алерты ↗</button>
       <button id="openFirms">FIRMS пожары ↗</button>
@@ -173,12 +175,32 @@
     </section>
 
     <section class="meaning-card">
+      <div class="card-head"><b>Матрица доказательств</b><span class="badge muted">что реально доступно</span></div>
+      <div id="evidenceMatrix" class="evidence-grid">
+        <div><span>Sentinel‑2</span><b>—</b><small>оптическое изменение</small></div>
+        <div><span>Sentinel‑1</span><b>—</b><small>SAR проверка</small></div>
+        <div><span>NISAR</span><b>—</b><small>L-band контекст</small></div>
+        <div><span>FIRMS</span><b>—</b><small>прямое тепло</small></div>
+      </div>
+    </section>
+
+    <section class="meaning-card">
       <div class="card-head"><b>Активный слой</b><span id="activeLayerKind" class="badge muted">подложка</span></div>
       <p id="activeLayerText">Аналитический слой пока не включён.</p>
     </section>
   </div>
 
   <div id="alerts" class="tab-body">
+    <div class="finding-controls">
+      <select id="findingType">
+        <option value="all">Все находки</option>
+        <option value="direct">Только прямые алерты</option>
+        <option value="candidate">Только кандидаты</option>
+      </select>
+      <label>Мин. индекс сигнала <b id="signalValue">40</b></label>
+      <input id="signalMin" type="range" min="0" max="100" step="5" value="40">
+      <button id="focusTopFinding">◎ К самой сильной находке</button>
+    </div>
     <div id="alertList" class="feed"><div class="empty">После проверки здесь появятся прямые алерты и кандидаты изменений. Новые спутниковые сцены показываются отдельно.</div></div>
   </div>
 
@@ -197,7 +219,7 @@
 
 <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>
-<script src="/static/leaflet-side-by-side.js?v=410-event-first"></script>
-<script src="/static/app.js?v=410-event-first"></script>
+<script src="/static/leaflet-side-by-side.js?v=420-product"></script>
+<script src="/static/app.js?v=420-product"></script>
 </body>
 </html>
