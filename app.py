@@ -24,7 +24,7 @@ CFG = json.loads((ROOT / 'CARPATHIANS_CONFIG.json').read_text(encoding='utf-8'))
 EARTH_SEARCH = 'https://earth-search.aws.element84.com/v1'
 _EVENT_CACHE = {}
 
-app = FastAPI(title='OEO Карпаты · Полесье 4.2 Free', version='4.2.0-free')
+app = FastAPI(title='OEO Карпаты · Полесье 4.3 Free', version='4.3.0-free')
 app.mount('/static', StaticFiles(directory=STATIC), name='static')
 
 @app.get('/')
@@ -34,7 +34,7 @@ async def root():
 @app.get('/health')
 async def health():
     return {
-        'monitor':'ok', 'version':'4.2.0-free', 'profile':'render-free',
+        'monitor':'ok', 'version':'4.3.0-free', 'profile':'render-free',
         'region':'Українські Карпати + Полісся', 'stac':True,
         'sentinel1':True, 'sentinel2':True, 'nisar':True,
         'firms_configured': bool(os.getenv('FIRMS_MAP_KEY')),
@@ -764,10 +764,13 @@ async def _boot_selftest():
         html=(STATIC/"index.html").read_text(encoding="utf-8")
         js=(STATIC/"app.js").read_text(encoding="utf-8")
         result["ui_contract"]={
-            "v42_brand":"Полесье 4.2" in html,
+            "v42_brand":"Полесье 4.3" in html,
             "footprints_default_off":'id="footprints"' in html and 'id="footprints" checked' not in html,
             "finding_filters":'id="signalMin"' in html and 'id="findingType"' in html,
             "demo_case":'id="demoCase"' in html,
+            "auto_watch":'id="autoWatch"' in html and "scheduleAutoWatch" in js,
+            "osmand_link":"openOsmAnd" in js and "osmand.net/map" in js,
+            "organic_maps_link":"openOrganic" in js and "omaps.app/map" in js,
             "signal_index_ui":"signal_index" in js and "confidence||0" not in js
         }
     except Exception as e:
