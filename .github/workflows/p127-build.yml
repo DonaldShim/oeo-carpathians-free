@@ -69,7 +69,7 @@ jobs:
         working-directory: p127-mvp/work/desktop
         shell: bash
         run: |
-          go mod download
+          go mod tidy
           go run . --self-check | tee /tmp/go_selfcheck.txt
 
       - name: Build Windows and Linux verifier
