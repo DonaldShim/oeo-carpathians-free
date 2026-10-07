@@ -425,6 +425,28 @@ async function scan(){
  finally{state.scanActive=false;$('scan').disabled=false;$('scan').textContent='Проверить участок'}
 }
 
+function scheduleAutoWatch(){
+ if(state.autoWatchTimer){clearInterval(state.autoWatchTimer);state.autoWatchTimer=null}
+ const on=$('autoWatch')?.checked!==false;persistMonitor();
+ if($('watchState'))$('watchState').textContent=on?'Автомониторинг включён: перепроверка каждые 15 минут при открытой вкладке.':'Автомониторинг выключен.';
+ if(!on)return;
+ state.autoWatchTimer=setInterval(()=>{
+  if(document.visibilityState==='visible'&&state.aoi&&!state.scanActive)scan();
+ },15*60*1000);
+}
+async function startDefaultMonitor(){
+ const restored=restoreMonitor();
+ let savedScenario=null;try{savedScenario=localStorage.getItem(LS_SCENARIO)}catch(e){}
+ if(savedScenario&&state.config.scenarios.some(x=>x.id===savedScenario))selectScenario(savedScenario);
+ if(!restored){
+  const p=state.config.presets.find(x=>x.id==='chornohora')||state.config.presets[0];
+  if(p){
+   $('preset').value=p.id;setPreset(p);selectScenario('forest');$('days').value='30';
+   toast('Автозапуск: Чорногора · строю реальные находки',3500);
+  }
+ }
+ if(state.aoi)await scan();
+}
 function setupTabs(){
  document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active',x===b));
@@ -439,7 +461,8 @@ function setupEvents(){
  $('screenAoi').onclick=currentScreenAOI;$('clearAoi').onclick=clearAOI;$('exportGeo').onclick=exportGeoJSON;
  $('focusAoi').onclick=()=>{if(!state.aoiLayer){toast('Сначала выберите участок');return}state.map.fitBounds(state.aoiLayer.getBounds(),{padding:[50,50],maxZoom:14,animate:true})};
  $('importGeo').onclick=()=>$('geoFile').click();$('geoFile').onchange=e=>{if(e.target.files[0])importGeoFile(e.target.files[0]);e.target.value=''};
- $('scan').onclick=scan;$('refreshTop').onclick=()=>state.aoi?scan():health().then(setUpdated).catch(()=>{});
+ $('scan').onclick=scan;$('refreshTop').onclick=()=>state.aoi?scan():startDefaultMonitor();
+ $('autoWatch').onchange=scheduleAutoWatch;
  $('base').onchange=switchBase;$('footprints').onchange=addFootprints;$('eventLayer').onchange=syncEventLayerVisibility;
  $('findingType').onchange=()=>{state.findingType=$('findingType').value;renderEventList()};
  $('signalMin').oninput=()=>{state.minSignal=Number($('signalMin').value);$('signalValue').textContent=String(state.minSignal);renderEventList()};
@@ -450,11 +473,19 @@ function setupEvents(){
  $('openGfw').onclick=()=>window.open('https://www.globalforestwatch.org/map/','_blank','noopener');
  $('openFirms').onclick=()=>window.open('https://firms.modaps.eosdis.nasa.gov/map/','_blank','noopener');
  $('dataList').onclick=e=>{const b=e.target.closest('button[data-kind]');if(!b)return;const id=decodeURIComponent(b.dataset.id);if(b.dataset.kind==='s2')showS2ById(id,'RGB');if(b.dataset.kind==='s2nbr')showS2ById(id,'NBR');if(b.dataset.kind==='s1')showS1ById(id,'VV')};
- $('alertList').onclick=e=>{const f=e.target.closest('button[data-event-focus]');if(f){focusEvent(f.dataset.eventFocus,true);return}const c=e.target.closest('button[data-event-compare]');if(c){compareEvent(c.dataset.eventCompare);return}};
+ $('alertList').onclick=e=>{
+  const f=e.target.closest('button[data-event-focus]');if(f){focusEvent(f.dataset.eventFocus,true);return}
+  const c=e.target.closest('button[data-event-compare]');if(c){compareEvent(c.dataset.eventCompare);return}
+  const o=e.target.closest('button[data-event-osmand]');if(o){openOsmAnd(o.dataset.eventOsmand);return}
+  const m=e.target.closest('button[data-event-organic]');if(m){openOrganic(m.dataset.eventOrganic);return}
+ };
 }
 async function init(){
  initMap();setupTabs();setupEvents();resetSummary();
  const c=await getJSON('/api/config');setupConfig(c);await health();await sensors();setUpdated();
+ try{$('autoWatch').checked=localStorage.getItem(LS_AUTOWATCH)!=='0'}catch(e){}
+ scheduleAutoWatch();
  setInterval(()=>health().catch(()=>{}),60000);
+ setTimeout(()=>startDefaultMonitor().catch(e=>toast('Автозапуск не удался: '+e.message,5000)),350);
 }
 init().catch(e=>{setStatus(false,'ошибка запуска');toast('Ошибка запуска OEO: '+e.message,7000)});
