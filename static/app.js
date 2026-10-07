@@ -1,7 +1,7 @@
 const state={
  map:null,baseLayer:null,aoiLayer:null,aoi:null,config:null,health:null,scenario:'forest',
  s1Scenes:[],s2Scenes:[],nisarScenes:[],footprintLayers:[],events:[],eventLayers:[],eventLayerById:{},alertMeta:null,
- findingType:'all',minSignal:40,
+ findingType:'all',minSignal:40,scanActive:false,autoWatchTimer:null,
  s2Layer:null,s1Layer:null,compareLayers:[],compareControl:null,lastActivity:null
 };
 const $=id=>document.getElementById(id);
@@ -10,6 +10,22 @@ function toast(t,ms=2600){const e=$('toast');e.textContent=t;e.style.display='bl
 function fmtDate(v){if(!v)return'—';try{return new Date(v).toLocaleString('ru-RU',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'})}catch(e){return v}}
 function fmtShort(v){if(!v)return'—';try{return new Date(v).toLocaleDateString('ru-RU',{day:'2-digit',month:'2-digit',year:'2-digit'})}catch(e){return v}}
 function bboxString(){return state.aoi?state.aoi.join(','):null}
+const LS_AOI='oeo_v43_last_aoi',LS_SCENARIO='oeo_v43_scenario',LS_AUTOWATCH='oeo_v43_autowatch';
+function persistMonitor(){
+ try{
+  if(state.aoi)localStorage.setItem(LS_AOI,JSON.stringify({bbox:state.aoi,label:$('topAoi')?.textContent||'Последний участок'}));
+  if(state.scenario)localStorage.setItem(LS_SCENARIO,state.scenario);
+  if($('autoWatch'))localStorage.setItem(LS_AUTOWATCH,$('autoWatch').checked?'1':'0');
+ }catch(e){}
+}
+function restoreMonitor(){
+ try{
+  const raw=localStorage.getItem(LS_AOI);if(!raw)return false;
+  const x=JSON.parse(raw),b=x?.bbox;
+  if(!Array.isArray(b)||b.length!==4||!b.every(Number.isFinite))return false;
+  setAOILayer(L.rectangle([[b[1],b[0]],[b[3],b[2]]]),x.label||'Последний участок',true);return true;
+ }catch(e){return false}
+}
 function setStatus(ok,text){$('sysDot').style.background=ok?'#39b983':'#e56f6f';$('sysText').textContent=text}
 function setUpdated(){ $('updatedAt').textContent=new Date().toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'}) }
 
@@ -52,13 +68,14 @@ function setAOILayer(layer,label,fit=true){
  $('topAoi').textContent=label;
  $('mapHint').style.display='none';
  if(fit)state.map.fitBounds(b,{padding:[24,24],maxZoom:14});
+ persistMonitor();
 }
 function setPreset(p){setAOILayer(L.rectangle([[p.bbox[1],p.bbox[0]],[p.bbox[3],p.bbox[2]]]),p.label,true)}
 function currentScreenAOI(){const b=state.map.getBounds();setAOILayer(L.rectangle([[b.getSouth(),b.getWest()],[b.getNorth(),b.getEast()]]),'Текущий экран',false)}
 function clearAOI(){
  stopCompare();hideS2();hideS1();clearFootprints();clearEvents();
  if(state.aoiLayer){state.map.removeLayer(state.aoiLayer);state.aoiLayer=null}
- state.aoi=null;$('aoiLabel').textContent='Участок ещё не выбран';$('topAoi').textContent='не выбран';$('mapHint').style.display='block';
+ state.aoi=null;try{localStorage.removeItem(LS_AOI)}catch(e){};$('aoiLabel').textContent='Участок ещё не выбран';$('topAoi').textContent='не выбран';$('mapHint').style.display='block';
  resetSummary();
 }
 function exportGeoJSON(){
@@ -96,7 +113,7 @@ function selectScenario(id){
  if([...$('days').options].some(o=>o.value===String(s.days)))$('days').value=String(s.days);
  if(s.base&&bases[s.base]){$('base').value=s.base;switchBase()}
  if(s.s2_mode&&[...$('s2Mode').options].some(o=>o.value===s.s2_mode))$('s2Mode').value=s.s2_mode;
- $('periodMetric').textContent=$('days').value+'д';
+ $('periodMetric').textContent=$('days').value+'д';persistMonitor();
 }
 
 function resetSummary(){
@@ -359,6 +376,8 @@ async function sensors(){
 
 async function scan(){
  if(!state.aoi){toast('Сначала выберите или нарисуйте участок');return}
+ if(state.scanActive)return;
+ state.scanActive=true;persistMonitor();
  const b=encodeURIComponent(bboxString()),days=Number($('days').value||30);$('periodMetric').textContent=days+'д';
  $('scan').disabled=true;$('scan').textContent='Проверка…';
  try{
@@ -379,7 +398,7 @@ async function scan(){
   renderEvents(ev);
   setUpdated();$('mapHint').style.display='none';toast(`Обновлено: находки ${state.events.length} · S1 ${state.s1Scenes.length} · S2 ${state.s2Scenes.length} · NISAR ${state.nisarScenes.length}`);
  }catch(e){setStatus(false,'ошибка обновления');toast('Не удалось обновить мониторинг: '+e.message,6000)}
- finally{$('scan').disabled=false;$('scan').textContent='Проверить участок'}
+ finally{state.scanActive=false;$('scan').disabled=false;$('scan').textContent='Проверить участок'}
 }
 
 function setupTabs(){
