@@ -28,6 +28,41 @@ jobs:
           mkdir -p p127-mvp/work
           unzip -q /tmp/p127_source.zip -d p127-mvp/work
 
+      - name: Harden Windows LAN address selection
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('p127-mvp/work/desktop/main.go')
+          s=p.read_text()
+          a=s.index('func privateIPv4() string {')
+          b=s.index('\nfunc openBrowser', a)
+          new='''func privateIPv4() string {
+\tifs, _ := net.Interfaces()
+\tvar p192, p10, p172 []string
+\tfor _, i := range ifs {
+\t\tif i.Flags&net.FlagUp == 0 || i.Flags&net.FlagLoopback != 0 { continue }
+\t\taddrs, _ := i.Addrs()
+\t\tfor _, a := range addrs {
+\t\t\tvar ip net.IP
+\t\t\tswitch x := a.(type) { case *net.IPNet: ip=x.IP; case *net.IPAddr: ip=x.IP }
+\t\t\tif ip == nil { continue }
+\t\t\tv := ip.To4(); if v == nil { continue }
+\t\t\tswitch {
+\t\t\tcase v[0] == 192 && v[1] == 168: p192=append(p192,v.String())
+\t\t\tcase v[0] == 10: p10=append(p10,v.String())
+\t\t\tcase v[0] == 172 && v[1] >= 16 && v[1] <= 31: p172=append(p172,v.String())
+\t\t\t}
+\t\t}
+\t}
+\tif len(p192)>0 { return p192[0] }
+\tif len(p10)>0 { return p10[0] }
+\tif len(p172)>0 { return p172[0] }
+\treturn "127.0.0.1"
+}'''
+          p.write_text(s[:a]+new+s[b:])
+          PY
+
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
@@ -78,6 +113,20 @@ jobs:
         run: |
           GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o p127.exe .
           GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o p127-linux-amd64 .
+
+      - name: Built verifier HTTP smoke test
+        working-directory: p127-mvp/work/desktop
+        shell: bash
+        run: |
+          ./p127-linux-amd64 >/tmp/p127_http.log 2>&1 & PID=$!
+          trap 'kill $PID 2>/dev/null || true' EXIT
+          for i in $(seq 1 20); do
+            if curl -fsS http://127.0.0.1:8787/api/state | tee /tmp/http_state.json; then break; fi
+            sleep 0.5
+          done
+          grep -q '"version":"1.0.0"' /tmp/http_state.json
+          kill $PID || true
+          trap - EXIT
 
       - name: Package release artifact
         shell: bash
