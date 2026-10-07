@@ -180,6 +180,30 @@ function deltaLabel(e){
  const raw=Number(e.delta_index||0),res=Number(e.residual_delta??raw),base=Number(e.scene_baseline_delta||0);
  return `локальный Δ${e.mode||'index'} ${res>=0?'+':''}${res.toFixed(3)} · фон ${base>=0?'+':''}${base.toFixed(3)}`;
 }
+function eventCenter(e){
+ if(e?.geometry?.type==='Point'){
+  const [lon,lat]=e.geometry.coordinates||[];if(Number.isFinite(lat)&&Number.isFinite(lon))return [lat,lon];
+ }
+ const b=e?.bbox;
+ if(Array.isArray(b)&&b.length===4)return [(Number(b[1])+Number(b[3]))/2,(Number(b[0])+Number(b[2]))/2];
+ try{
+  const l=state.eventLayerById[e?.id];
+  if(l?.getBounds){const c=l.getBounds().getCenter();return [c.lat,c.lng]}
+ }catch(err){}
+ return null;
+}
+function openOsmAnd(id){
+ const e=state.events.find(x=>x.id===id),c=eventCenter(e);if(!c){toast('Нет координат находки');return}
+ const [lat,lon]=c.map(Number),z=16;
+ const u=`https://osmand.net/map/?pin=${lat.toFixed(6)},${lon.toFixed(6)}#${z}/${lat.toFixed(6)}/${lon.toFixed(6)}`;
+ window.open(u,'_blank','noopener');
+}
+function openOrganic(id){
+ const e=state.events.find(x=>x.id===id),c=eventCenter(e);if(!c){toast('Нет координат находки');return}
+ const [lat,lon]=c.map(Number),name=encodeURIComponent('OEO · '+(e?.title||'находка'));
+ const u=`https://omaps.app/map?v=1&ll=${lat.toFixed(6)},${lon.toFixed(6)}&n=${name}`;
+ window.open(u,'_blank','noopener');
+}
 function eventCard(e){
  const direct=e.class==='direct',idx=signalIndex(e);
  const before=e.before?.datetime?fmtShort(e.before.datetime):'—';
@@ -198,7 +222,7 @@ function eventCard(e){
    <small>${meta}</small>
    ${temporal}
    <div class="finding-why">${esc(why)}</div>
-   <div class="alert-actions"><button data-event-focus="${esc(e.id)}">Показать на карте</button>${(!direct&&e.before?.id&&e.after?.id)?`<button data-event-compare="${esc(e.id)}">До / после</button>`:''}</div>
+   <div class="alert-actions"><button data-event-focus="${esc(e.id)}">Показать на карте</button>${(!direct&&e.before?.id&&e.after?.id)?`<button data-event-compare="${esc(e.id)}">До / после</button>`:''}<button data-event-osmand="${esc(e.id)}">OsmAnd ↗</button><button data-event-organic="${esc(e.id)}">Organic ↗</button></div>
  </div>`;
 }
 function visibleEvents(){return state.events.filter(findingVisible).sort((a,b)=>signalIndex(b)-signalIndex(a))}
