@@ -1,0 +1,97 @@
+name: p127-mvp-build
+
+on:
+  push:
+    branches: [p127-mobile-attestor-build]
+    paths:
+      - 'p127-mvp/**'
+      - '.github/workflows/p127-build.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'p127-mvp/**'
+      - '.github/workflows/p127-build.yml'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Reconstruct exact source bundle
+        shell: bash
+        run: |
+          cat p127-mvp/chunks/chunk_* | tr -d '\n\r' | base64 -d > /tmp/p127_source.zip
+          echo "cd7a755ac1835e283df14fc3e73c8f2f52f84015bd82382e18ca7e635f3d5779  /tmp/p127_source.zip" | sha256sum -c -
+          mkdir -p p127-mvp/work
+          unzip -q /tmp/p127_source.zip -d p127-mvp/work
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK components
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Build Android APK
+        working-directory: p127-mvp/work/android
+        run: gradle :app:assembleDebug --stacktrace
+
+      - name: Verify APK and stage embedded asset
+        shell: bash
+        run: |
+          APK=p127-mvp/work/android/app/build/outputs/apk/debug/app-debug.apk
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose "$APK"
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | tee /tmp/apk_badging.txt
+          mkdir -p p127-mvp/work/desktop/assets
+          cp "$APK" p127-mvp/work/desktop/assets/P127_Attestor_PocoC65.apk
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+
+      - name: Desktop verifier self-check
+        working-directory: p127-mvp/work/desktop
+        shell: bash
+        run: |
+          go mod download
+          go run . --self-check | tee /tmp/go_selfcheck.txt
+
+      - name: Build Windows and Linux verifier
+        working-directory: p127-mvp/work/desktop
+        shell: bash
+        run: |
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o p127.exe .
+          GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o p127-linux-amd64 .
+
+      - name: Package release artifact
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp p127-mvp/work/desktop/p127.exe dist/
+          cp p127-mvp/work/desktop/p127-linux-amd64 dist/
+          cp p127-mvp/work/desktop/START_P127.cmd dist/
+          cp p127-mvp/work/desktop/README_RU.txt dist/
+          cp p127-mvp/work/desktop/assets/P127_Attestor_PocoC65.apk dist/
+          cp /tmp/apk_badging.txt dist/APK_BADGING.txt
+          cp /tmp/go_selfcheck.txt dist/VERIFIER_SELF_CHECK.txt
+          (cd p127-mvp/work && zip -qr "$GITHUB_WORKSPACE/dist/P127_MVP_SOURCE.zip" android desktop -x '*/build/*' 'desktop/assets/P127_Attestor_PocoC65.apk' 'desktop/p127.exe' 'desktop/p127-linux-amd64')
+          (cd dist && sha256sum P127_Attestor_PocoC65.apk p127.exe p127-linux-amd64 P127_MVP_SOURCE.zip > SHA256SUMS.txt)
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: P127_Mobile_Attestor_MVP_PocoC65
+          path: dist/
+          if-no-files-found: error
