@@ -24,7 +24,7 @@ CFG = json.loads((ROOT / 'CARPATHIANS_CONFIG.json').read_text(encoding='utf-8'))
 EARTH_SEARCH = 'https://earth-search.aws.element84.com/v1'
 _EVENT_CACHE = {}
 
-app = FastAPI(title='OEO Карпаты · Полесье 4.3 Free', version='4.3.0-free')
+app = FastAPI(title='OEO Карпаты · Полесье 4.4 Free', version='4.4.0-free')
 app.mount('/static', StaticFiles(directory=STATIC), name='static')
 
 @app.get('/')
@@ -34,7 +34,7 @@ async def root():
 @app.get('/health')
 async def health():
     return {
-        'monitor':'ok', 'version':'4.3.0-free', 'profile':'render-free',
+        'monitor':'ok', 'version':'4.4.0-free', 'profile':'render-free',
         'region':'Українські Карпати + Полісся', 'stac':True,
         'sentinel1':True, 'sentinel2':True, 'nisar':True,
         'firms_configured': bool(os.getenv('FIRMS_MAP_KEY')),
@@ -534,7 +534,7 @@ def _aoi_change_sync(before_id: str, after_id: str, mode: str, scenario: str, bb
             continue
     polys.sort(key=lambda p:p["area_ha"],reverse=True)
     return {
-        "stats":stats,"polygons":polys[:48],"metric":metric,"label":label,
+        "stats":stats,"polygons":polys[:200],"metric":metric,"label":label,
         "resolution_m":res_m,"width":width,"height":height,"min_area_ha":min_area_ha
     }
 
@@ -642,11 +642,12 @@ async def event_candidates(bbox: str, days: int=30, scenario: str="forest"):
                     "metrics":{k:round(v,4) if isinstance(v,float) else v for k,v in stats.items()}
                 })
         events.sort(key=lambda e:(e.get("signal_index",0),e.get("area_ha",0)),reverse=True)
-        events=events[:24]
+        events=events[:200]
         diagnostics.update({
             "before":before.get("datetime"),"after":after.get("datetime"),
             "strategy":strategy,
             "candidate_polygons":len(events),"raw_polygons":polygon_count,
+            "returned_limit":200,"truncated":polygon_count>len(events),
             "geometry":"cloud_masked_pixel_polygon",
             "sampling":"whole_aoi_contiguous" if strategy=="whole_aoi_part" else "uniform_aoi_two_stage",
             "compensation":"scene_median_delta",
@@ -764,7 +765,7 @@ async def _boot_selftest():
         html=(STATIC/"index.html").read_text(encoding="utf-8")
         js=(STATIC/"app.js").read_text(encoding="utf-8")
         result["ui_contract"]={
-            "v42_brand":"Полесье 4.3" in html,
+            "v42_brand":"Полесье 4.4" in html,
             "footprints_default_off":'id="footprints"' in html and 'id="footprints" checked' not in html,
             "finding_filters":'id="signalMin"' in html and 'id="findingType"' in html,
             "demo_case":'id="demoCase"' in html,
