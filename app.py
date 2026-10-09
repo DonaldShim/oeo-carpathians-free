@@ -707,8 +707,8 @@ def _tile_xyz(lon: float, lat: float, z: int):
 
 async def _boot_selftest():
     await asyncio.sleep(2)
-    bbox="24.52,48.10,24.70,48.24"
-    result={"bbox":bbox}
+    bbox="28.70,51.15,28.92,51.34"
+    result={"bbox":bbox,"acceptance_region":"polissia"}
     s1_items=[]; s2_items=[]
     try:
         s1=await sentinel1(bbox=bbox,days=30,max_results=4)
@@ -769,6 +769,10 @@ async def _boot_selftest():
             "footprints_default_off":'id="footprints"' in html and 'id="footprints" checked' not in html,
             "finding_filters":'id="signalMin"' in html and 'id="findingType"' in html,
             "demo_case":'id="demoCase"' in html,
+            "demo_polissia":'id="demoPolissia"' in html and "polissia_ovruch" in js,
+            "region_selector":'id="region"' in html and "populatePresets" in js,
+            "show_all_default":'id="signalMin"' in html and 'value="0"' in html and "minSignal:0" in js,
+            "no_top24":"events=events[:24]" not in Path(__file__).read_text(encoding="utf-8"),
             "auto_watch":'id="autoWatch"' in html and "scheduleAutoWatch" in js,
             "osmand_link":"openOsmAnd" in js and "osmand.net/map" in js,
             "organic_maps_link":"openOrganic" in js and "omaps.app/map" in js,
