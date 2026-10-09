@@ -431,7 +431,7 @@ async function scan(){
   renderSummary(activity);renderEvidenceMatrix(activity);fillSceneSelectors();renderData(activity);addFootprints();
   $('scan').textContent='Строю контуры изменений…';
   let ev=null;
-  try{ev=await getJSON(`/api/v3/events/candidates?bbox=${b}&days=${days}&scenario=${encodeURIComponent(state.scenario)}`)}
+  try{ev=await getJSON(`/api/v3/events/candidates?bbox=${b}&days=${days}&scenario=${encodeURIComponent(state.scenario)}&max_events=500`)}
   catch(err){ev={events:[],count:0,firms_configured:state.health?.firms_configured,warning:err.message};toast('Слой находок временно недоступен: '+err.message,5000)}
   renderEvents(ev);
   setUpdated();$('mapHint').style.display='none';toast(`Обновлено: находки ${state.events.length} · S1 ${state.s1Scenes.length} · S2 ${state.s2Scenes.length} · NISAR ${state.nisarScenes.length}`);
