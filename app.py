@@ -534,7 +534,7 @@ def _aoi_change_sync(before_id: str, after_id: str, mode: str, scenario: str, bb
             continue
     polys.sort(key=lambda p:p["area_ha"],reverse=True)
     return {
-        "stats":stats,"polygons":polys[:200],"metric":metric,"label":label,
+        "stats":stats,"polygons":polys[:500],"metric":metric,"label":label,
         "resolution_m":res_m,"width":width,"height":height,"min_area_ha":min_area_ha
     }
 
@@ -566,11 +566,12 @@ async def _pick_compare_scenes(bbox, days):
     return before,after,items
 
 @app.get('/api/v3/events/candidates')
-async def event_candidates(bbox: str, days: int=30, scenario: str="forest"):
+async def event_candidates(bbox: str, days: int=30, scenario: str="forest", max_events: int=500):
     b=_bbox(bbox)
     scenario=scenario if scenario in {"forest","fire","flood","slope"} else "forest"
+    max_events=max(1,min(int(max_events),500))
     _now=__import__("time").time()
-    _key=(tuple(round(v,5) for v in b),int(days),scenario)
+    _key=(tuple(round(v,5) for v in b),int(days),scenario,max_events)
     _cached=_EVENT_CACHE.get(_key)
     if _cached and _now-_cached[0] < 600:
         return dict(_cached[1], cache_hit=True)
@@ -642,12 +643,12 @@ async def event_candidates(bbox: str, days: int=30, scenario: str="forest"):
                     "metrics":{k:round(v,4) if isinstance(v,float) else v for k,v in stats.items()}
                 })
         events.sort(key=lambda e:(e.get("signal_index",0),e.get("area_ha",0)),reverse=True)
-        events=events[:200]
+        events=events[:max_events]
         diagnostics.update({
             "before":before.get("datetime"),"after":after.get("datetime"),
             "strategy":strategy,
             "candidate_polygons":len(events),"raw_polygons":polygon_count,
-            "returned_limit":200,"truncated":polygon_count>len(events),
+            "returned_limit":max_events,"truncated":polygon_count>len(events),
             "geometry":"cloud_masked_pixel_polygon",
             "sampling":"whole_aoi_contiguous" if strategy=="whole_aoi_part" else "uniform_aoi_two_stage",
             "compensation":"scene_median_delta",
@@ -765,14 +766,14 @@ async def _boot_selftest():
         html=(STATIC/"index.html").read_text(encoding="utf-8")
         js=(STATIC/"app.js").read_text(encoding="utf-8")
         result["ui_contract"]={
-            "v42_brand":"Полесье 4.4" in html,
+            "v44_brand":"Полесье 4.4" in html,
             "footprints_default_off":'id="footprints"' in html and 'id="footprints" checked' not in html,
             "finding_filters":'id="signalMin"' in html and 'id="findingType"' in html,
             "demo_case":'id="demoCase"' in html,
             "demo_polissia":'id="demoPolissia"' in html and "polissia_ovruch" in js,
             "region_selector":'id="region"' in html and "populatePresets" in js,
             "show_all_default":'id="signalMin"' in html and 'value="0"' in html and "minSignal:0" in js,
-            "no_top24":"events=events[:24]" not in Path(__file__).read_text(encoding="utf-8"),
+            "no_top24":ev.get("candidate_count",0)>24,
             "auto_watch":'id="autoWatch"' in html and "scheduleAutoWatch" in js,
             "osmand_link":"openOsmAnd" in js and "osmand.net/map" in js,
             "organic_maps_link":"openOrganic" in js and "omaps.app/map" in js,
