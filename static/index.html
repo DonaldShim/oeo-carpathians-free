@@ -3,15 +3,15 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>OEO Карпаты · Полесье 4.3</title>
+<title>OEO Карпаты · Полесье 4.4</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet-draw@1.0.4/dist/leaflet.draw.css">
-<link rel="stylesheet" href="/static/app.css?v=430-autowatch">
+<link rel="stylesheet" href="/static/app.css?v=440-polissia">
 </head>
 <body>
 <header class="topbar">
   <div class="brand">
-    <div class="brand-main">OEO <strong>Карпаты · Полесье 4.3</strong></div>
+    <div class="brand-main">OEO <strong>Карпаты · Полесье 4.4</strong></div>
     <div class="brand-sub">мониторинг изменений по открытым спутниковым данным</div>
   </div>
   <div class="top-status">
@@ -28,9 +28,19 @@
 
   <section class="control-card">
     <div class="step"><span>1</span><div><b>Выберите участок</b><small>Карпатский пресет или точная область на карте</small></div></div>
+    <label class="field-label">Регион</label>
+    <select id="region">
+      <option value="all">Все регионы</option>
+      <option value="polissia">Полесье</option>
+      <option value="carpathians">Украинские Карпаты</option>
+    </select>
+    <label class="field-label">Готовый участок</label>
     <select id="preset"></select>
     <button id="usePreset" class="primary soft">Показать выбранный район</button>
-    <button id="demoCase" class="demo-btn">▶ Демо: найти изменения в Чорногоре</button>
+    <div class="button-grid">
+      <button id="demoPolissia" class="demo-btn">▶ Демо Полесье</button>
+      <button id="demoCase" class="demo-btn">▶ Демо Карпаты</button>
+    </div>
     <div class="button-grid three">
       <button id="drawRect">▭ Прямоугольник</button>
       <button id="drawPoly">⬡ Полигон</button>
@@ -47,7 +57,7 @@
   </section>
 
   <section class="control-card">
-    <div class="step"><span>2</span><div><b>Сценарий Карпат</b><small>Настраивает период, подложку и аналитический режим</small></div></div>
+    <div class="step"><span>2</span><div><b>Сценарий мониторинга</b><small>Одинаково работает для Полесья и Карпат</small></div></div>
     <div id="scenarios" class="scenario-grid"></div>
     <div id="scenarioHelp" class="help"></div>
   </section>
@@ -199,8 +209,9 @@
         <option value="direct">Только прямые алерты</option>
         <option value="candidate">Только кандидаты</option>
       </select>
-      <label>Мин. индекс сигнала <b id="signalValue">40</b></label>
-      <input id="signalMin" type="range" min="0" max="100" step="5" value="40">
+      <label>Мин. индекс сигнала <b id="signalValue">0</b></label>
+      <input id="signalMin" type="range" min="0" max="100" step="5" value="0">
+      <div id="findingStats" class="help">Показаны все найденные сигналы.</div>
       <button id="focusTopFinding">◎ К самой сильной находке</button>
     </div>
     <div id="alertList" class="feed"><div class="empty">После проверки здесь появятся прямые алерты и кандидаты изменений. Новые спутниковые сцены показываются отдельно.</div></div>
@@ -221,7 +232,7 @@
 
 <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>
-<script src="/static/leaflet-side-by-side.js?v=430-autowatch"></script>
-<script src="/static/app.js?v=430-autowatch"></script>
+<script src="/static/leaflet-side-by-side.js?v=440-polissia"></script>
+<script src="/static/app.js?v=440-polissia"></script>
 </body>
 </html>
