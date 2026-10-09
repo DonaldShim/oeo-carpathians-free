@@ -1,7 +1,7 @@
 const state={
  map:null,baseLayer:null,aoiLayer:null,aoi:null,config:null,health:null,scenario:'forest',
  s1Scenes:[],s2Scenes:[],nisarScenes:[],footprintLayers:[],events:[],eventLayers:[],eventLayerById:{},alertMeta:null,
- findingType:'all',minSignal:40,scanActive:false,autoWatchTimer:null,
+ findingType:'all',minSignal:0,currentRegion:'all',scanActive:false,autoWatchTimer:null,
  s2Layer:null,s1Layer:null,compareLayers:[],compareControl:null,lastActivity:null
 };
 const $=id=>document.getElementById(id);
@@ -70,7 +70,11 @@ function setAOILayer(layer,label,fit=true){
  if(fit)state.map.fitBounds(b,{padding:[24,24],maxZoom:14});
  persistMonitor();
 }
-function setPreset(p){setAOILayer(L.rectangle([[p.bbox[1],p.bbox[0]],[p.bbox[3],p.bbox[2]]]),p.label,true)}
+function setPreset(p){
+ if($('region')&&p?.region){$('region').value=p.region;state.currentRegion=p.region;populatePresets(p.region);$('preset').value=p.id}
+ const prefix=p?.region==='polissia'?'Полесье · ':p?.region==='carpathians'?'Карпаты · ':'';
+ setAOILayer(L.rectangle([[p.bbox[1],p.bbox[0]],[p.bbox[3],p.bbox[2]]]),prefix+p.label,true)
+}
 function currentScreenAOI(){const b=state.map.getBounds();setAOILayer(L.rectangle([[b.getSouth(),b.getWest()],[b.getNorth(),b.getEast()]]),'Текущий экран',false)}
 function clearAOI(){
  stopCompare();hideS2();hideS1();clearFootprints();clearEvents();
@@ -99,9 +103,18 @@ async function health(){
  try{const x=await getJSON('/health');state.health=x;setStatus(true,'система готова · '+x.version);return x}
  catch(e){setStatus(false,'система недоступна');throw e}
 }
+function populatePresets(region='all'){
+ state.currentRegion=region||'all';
+ const list=state.config.presets.filter(p=>state.currentRegion==='all'||p.region===state.currentRegion);
+ $('preset').innerHTML='<option value="">— выберите район —</option>'+list.map(p=>{
+   const prefix=state.currentRegion==='all'?(p.region==='polissia'?'Полесье · ':'Карпаты · '):'';
+   return `<option value="${esc(p.id)}">${prefix}${esc(p.label)}</option>`;
+ }).join('');
+}
 function setupConfig(c){
  state.config=c;
- $('preset').innerHTML='<option value="">— выберите район —</option>'+c.presets.map(p=>`<option value="${esc(p.id)}">${esc(p.label)}</option>`).join('');
+ if(c.regions&&$('region'))$('region').innerHTML=c.regions.map(r=>`<option value="${esc(r.id)}">${esc(r.label)}</option>`).join('');
+ populatePresets($('region')?.value||'all');
  $('scenarios').innerHTML=c.scenarios.map(s=>`<button data-id="${esc(s.id)}">${esc(s.label)}</button>`).join('');
  document.querySelectorAll('#scenarios button').forEach(b=>b.onclick=()=>selectScenario(b.dataset.id));
  selectScenario('forest');
@@ -248,7 +261,8 @@ function renderEventList(){
    <span class="src ${configured?'on':'off'}">FIRMS: ${configured?'ON':'нет ключа'}</span>
    <span class="src ext">GFW: внешний источник</span>
  </div>${perf}`;
- const list=visibleEvents();
+ const list=visibleEvents(),total=state.events.length;
+ if($('findingStats'))$('findingStats').textContent=`Показано ${list.length} из ${total} сигналов${state.alertMeta?.diagnostics?.truncated?' · серверный safety-cap 200':''}.`;
  $('alertList').innerHTML=sourceHtml+(list.length?list.map(eventCard).join(''):`<div class="empty"><b>По текущему фильтру находок нет.</b><br>Снизьте минимальный индекс сигнала или включите другой тип.</div>`);
  $('alertCount').textContent=String(list.length);
  syncEventLayerVisibility();
@@ -439,10 +453,10 @@ async function startDefaultMonitor(){
  let savedScenario=null;try{savedScenario=localStorage.getItem(LS_SCENARIO)}catch(e){}
  if(savedScenario&&state.config.scenarios.some(x=>x.id===savedScenario))selectScenario(savedScenario);
  if(!restored){
-  const p=state.config.presets.find(x=>x.id==='chornohora')||state.config.presets[0];
+  const p=state.config.presets.find(x=>x.id==='polissia_ovruch')||state.config.presets[0];
   if(p){
-   $('preset').value=p.id;setPreset(p);selectScenario('forest');$('days').value='30';
-   toast('Автозапуск: Чорногора · строю реальные находки',3500);
+   setPreset(p);selectScenario('forest');$('days').value='30';
+   toast('Автозапуск: Полесье · строю реальные находки',3500);
   }
  }
  if(state.aoi)await scan();
@@ -454,8 +468,10 @@ function setupTabs(){
  });
 }
 function setupEvents(){
+ $('region').onchange=()=>{populatePresets($('region').value)};
  $('usePreset').onclick=()=>{const p=state.config.presets.find(x=>x.id===$('preset').value);if(p)setPreset(p)};
- $('demoCase').onclick=async()=>{const p=state.config.presets.find(x=>x.id==='chornohora');if(!p)return;$('preset').value='chornohora';setPreset(p);selectScenario('forest');$('days').value='30';toast('Демо: Чорногора · анализ лесных изменений');await scan()};
+ $('demoPolissia').onclick=async()=>{const p=state.config.presets.find(x=>x.id==='polissia_ovruch');if(!p)return;setPreset(p);selectScenario('forest');$('days').value='30';toast('Демо: Полесье · Овруч/Народичи');await scan()};
+ $('demoCase').onclick=async()=>{const p=state.config.presets.find(x=>x.id==='chornohora');if(!p)return;setPreset(p);selectScenario('forest');$('days').value='30';toast('Демо: Карпаты · Чорногора');await scan()};
  $('drawRect').onclick=()=>new L.Draw.Rectangle(state.map,{shapeOptions:{color:'#49d096',weight:2,fillOpacity:.07}}).enable();
  $('drawPoly').onclick=()=>new L.Draw.Polygon(state.map,{allowIntersection:false,shapeOptions:{color:'#49d096',weight:2,fillOpacity:.07}}).enable();
  $('screenAoi').onclick=currentScreenAOI;$('clearAoi').onclick=clearAOI;$('exportGeo').onclick=exportGeoJSON;
