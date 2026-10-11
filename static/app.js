@@ -262,7 +262,7 @@ function renderEventList(){
    <span class="src ext">GFW: внешний источник</span>
  </div>${perf}`;
  const list=visibleEvents(),total=state.events.length;
- if($('findingStats'))$('findingStats').textContent=`Показано ${list.length} из ${total} сигналов${state.alertMeta?.diagnostics?.truncated?' · серверный safety-cap 200':''}.`;
+ if($('findingStats'))$('findingStats').textContent=`Показано ${list.length} из ${total} сигналов${state.alertMeta?.diagnostics?.truncated?' · серверный safety-cap 500':''}.`;
  $('alertList').innerHTML=sourceHtml+(list.length?list.map(eventCard).join(''):`<div class="empty"><b>По текущему фильтру находок нет.</b><br>Снизьте минимальный индекс сигнала или включите другой тип.</div>`);
  $('alertCount').textContent=String(list.length);
  syncEventLayerVisibility();
