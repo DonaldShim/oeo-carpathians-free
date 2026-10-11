@@ -100,3 +100,15 @@ label{user-select:none}
 .layer-badge{max-width:55%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
 .analysis-meta{margin:-2px 0 8px;padding:6px 8px;border-radius:7px;background:#081913;border:1px dashed #285143;color:#86aa9c;font-size:8px}.analysis-meta b{color:#d9f5e9}
+
+/* OEO 4.4 multisensor fusion */
+.evidence-badges{display:flex;flex-wrap:wrap;gap:4px;margin:7px 0}
+.ev-badge{font-size:7px;padding:3px 6px;border-radius:999px;border:1px solid #2b5144;background:#0b2119;color:#8fac9f}
+.ev-badge.on{border-color:#2b8f67;color:#b7f2d6;background:#0d3023}
+.ev-badge.soft{border-color:#5a6d8f;color:#cbd5ff;background:#121a2a}
+.ev-badge.off{opacity:.55}
+.ev-badge.direct{border-color:#a94747;color:#ffd0ca;background:#321515}
+.fusion-line{font-size:8px;color:#8dab9f;margin-top:3px}
+.fusion-line b{color:#dbf6e9}
+.fusion-summary{margin:-2px 0 8px;padding:6px 8px;border-radius:7px;background:#081913;border:1px solid #214739;color:#86aa9c;font-size:8px}
+.fusion-summary b{color:#d9f5e9}
