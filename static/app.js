@@ -217,6 +217,18 @@ function openOrganic(id){
  const u=`https://omaps.app/map?v=1&ll=${lat.toFixed(6)},${lon.toFixed(6)}&n=${name}`;
  window.open(u,'_blank','noopener');
 }
+function evidenceBadges(e){
+ const ev=e?.evidence||{},out=[];
+ out.push('<span class="ev-badge on">S2</span>');
+ const s1=ev.sentinel1||{};
+ if(s1.available)out.push('<span class="ev-badge '+(s1.support?'on':'soft')+'">S1 '+(s1.score??'—')+'</span>');
+ else out.push('<span class="ev-badge off">S1 —</span>');
+ const ni=ev.nisar||{};
+ if(ni.covered)out.push('<span class="ev-badge soft">NISAR '+(ni.product_count??1)+'</span>');
+ else out.push('<span class="ev-badge off">NISAR —</span>');
+ if(ev.firms?.direct)out.push('<span class="ev-badge direct">FIRMS</span>');
+ return '<div class="evidence-badges">'+out.join('')+'</div>';
+}
 function eventCard(e){
  const direct=e.class==='direct',idx=signalIndex(e);
  const before=e.before?.datetime?fmtShort(e.before.datetime):'—';
@@ -233,6 +245,8 @@ function eventCard(e){
    <div class="alert-card-head"><span class="alert-class">${eventLabel(e)}</span><span class="alert-score">${direct?'THERMAL':'сигнал '+idx+'/100'}</span></div>
    <b>${esc(e.title||'Изменение')}</b>
    <small>${meta}</small>
+   ${evidenceBadges(e)}
+   <div class="fusion-line">Fusion: <b>${esc(e.fusion_status||'S2_ONLY')}</b></div>
    ${temporal}
    <div class="finding-why">${esc(why)}</div>
    <div class="alert-actions"><button data-event-focus="${esc(e.id)}">Показать на карте</button>${(!direct&&e.before?.id&&e.after?.id)?`<button data-event-compare="${esc(e.id)}">До / после</button>`:''}<button data-event-osmand="${esc(e.id)}">OsmAnd ↗</button><button data-event-organic="${esc(e.id)}">Organic ↗</button></div>
