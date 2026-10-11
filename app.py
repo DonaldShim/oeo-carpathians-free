@@ -38,7 +38,7 @@ async def health():
         'region':'Українські Карпати + Полісся', 'stac':True,
         'sentinel1':True, 'sentinel2':True, 'nisar':True,
         'firms_configured': bool(os.getenv('FIRMS_MAP_KEY')),
-        'gfw_mode':'external-evidence','event_engine':'sentinel2-pixel-polygons-v42'
+        'gfw_mode':'external-evidence','event_engine':'multisensor-fusion-v44'
     }
 
 @app.get('/api/config')
@@ -549,6 +549,102 @@ def _signal_index(scenario: str, stats: dict, area_ha: float):
 def _mode_for_scenario(scenario: str):
     return {"forest":"NBR","fire":"NBR","flood":"NDWI","slope":"NDMI"}.get(scenario,"NBR")
 
+async def _pick_s1_pair(bbox, days):
+    items=await _stac_search("sentinel-1-grd",bbox,max(days,45),18)
+    if len(items)<2:
+        return None,None,items
+    after=items[0]
+    ad=_dt(after.get("datetime"))
+    before=None
+    if ad:
+        for q in items[1:]:
+            qd=_dt(q.get("datetime"))
+            if qd and abs((ad-qd).days)>=6:
+                before=q; break
+    if before is None:
+        before=items[min(len(items)-1,4)]
+    return before,after,items
+
+def _s1_part(item_id: str, pol: str, bbox, width: int, height: int):
+    with STACReader(_stac_item_url("sentinel-1-grd",item_id)) as src:
+        return src.part(
+            tuple(bbox), assets=[pol.lower()],
+            width=width, height=height,
+            bounds_crs="EPSG:4326", dst_crs="EPSG:4326",
+            resampling_method="bilinear", reproject_method="bilinear"
+        )
+
+def _s1_context_sync(before_id: str, after_id: str, bbox, width=512, height=512):
+    import numpy as np
+    out={"ok":False}
+    for pol in ("vv","vh"):
+        try:
+            a=_s1_part(before_id,pol,bbox,width,height)
+            b=_s1_part(after_id,pol,bbox,width,height)
+            av=np.asarray(a.data[0],dtype="float32")
+            bv=np.asarray(b.data[0],dtype="float32")
+            valid=(np.asarray(a.mask)>0)&(np.asarray(b.mask)>0)&np.isfinite(av)&np.isfinite(bv)
+            if valid.sum()<500:
+                continue
+            delta=np.full(av.shape,np.nan,dtype="float32")
+            delta[valid]=bv[valid]-av[valid]
+            baseline=float(np.nanmedian(delta[valid]))
+            residual=np.full(av.shape,np.nan,dtype="float32")
+            residual[valid]=delta[valid]-baseline
+            mad=float(np.nanmedian(np.abs(residual[valid]-np.nanmedian(residual[valid]))))
+            scale=max(mad*1.4826,1e-6)
+            out[pol]={
+                "residual":residual,"valid":valid,"baseline":baseline,"scale":scale
+            }
+            out["ok"]=True
+        except Exception:
+            continue
+    out.update({"bbox":bbox,"width":width,"height":height})
+    return out
+
+def _bbox_overlap(a,b):
+    if not a or not b:return False
+    return not (a[2]<b[0] or a[0]>b[2] or a[3]<b[1] or a[1]>b[3])
+
+def _s1_evidence_for_bbox(ctx, bb):
+    import numpy as np
+    if not ctx or not ctx.get("ok") or not bb:
+        return {"available":False}
+    minlon,minlat,maxlon,maxlat=ctx["bbox"]; w=ctx["width"]; h=ctx["height"]
+    if maxlon<=minlon or maxlat<=minlat:return {"available":False}
+    x0=max(0,min(w-1,int((bb[0]-minlon)/(maxlon-minlon)*w)))
+    x1=max(x0+1,min(w,int((bb[2]-minlon)/(maxlon-minlon)*w)+1))
+    y0=max(0,min(h-1,int((maxlat-bb[3])/(maxlat-minlat)*h)))
+    y1=max(y0+1,min(h,int((maxlat-bb[1])/(maxlat-minlat)*h)+1))
+    scores=[]; details={}
+    for pol in ("vv","vh"):
+        p=ctx.get(pol)
+        if not p:continue
+        r=p["residual"][y0:y1,x0:x1]; v=p["valid"][y0:y1,x0:x1]
+        if v.sum()<20:continue
+        vals=r[v]
+        z=float(np.nanmean(np.abs(vals))/max(p["scale"],1e-6))
+        med=float(np.nanmedian(vals))
+        frac=float(np.mean(np.abs(vals)>2.0*p["scale"]))
+        score=int(round(max(0,min(100,20+30*min(z/3,1)+50*min(frac/0.35,1)))))
+        scores.append(score)
+        details[pol]={"score":score,"median_residual":round(med,5),"strong_fraction":round(frac,4)}
+    if not scores:return {"available":False}
+    best=max(scores)
+    return {"available":True,"score":best,"support":best>=55,"details":details}
+
+def _nisar_context_for_bbox(items, bb, after_dt=None):
+    overlaps=[]
+    ad=_dt(after_dt) if isinstance(after_dt,str) else after_dt
+    for x in items or []:
+        gbb=_geom_bbox(x.get("geometry") or {})
+        if not _bbox_overlap(gbb,bb):continue
+        qd=_dt(x.get("datetime"))
+        dd=abs((ad-qd).days) if ad and qd else None
+        overlaps.append({"id":x.get("id"),"datetime":x.get("datetime"),"days_from_after":dd})
+    overlaps.sort(key=lambda q:999999 if q["days_from_after"] is None else q["days_from_after"])
+    return {"covered":bool(overlaps),"product_count":len(overlaps),"closest":overlaps[0] if overlaps else None}
+
 async def _pick_compare_scenes(bbox, days):
     items=await _stac_search("sentinel-2-l2a",bbox,max(days,75),18,45)
     if len(items)<2:
@@ -576,8 +672,25 @@ async def event_candidates(bbox: str, days: int=30, scenario: str="forest", max_
     if _cached and _now-_cached[0] < 600:
         return dict(_cached[1], cache_hit=True)
     before,after,items=await _pick_compare_scenes(b,days)
+    s1_before,s1_after,s1_items=await _pick_s1_pair(b,days)
+    nisar_data=await nisar(bbox,max(days,90),24)
+    nisar_items=nisar_data.get("results") or []
+    s1_ctx=None
+    if s1_before and s1_after and s1_before.get("id")!=s1_after.get("id"):
+        try:
+            s1_ctx=await asyncio.to_thread(_s1_context_sync,s1_before["id"],s1_after["id"],b,512,512)
+        except Exception:
+            s1_ctx=None
     events=[]
-    diagnostics={"scene_count":len(items),"mode":_mode_for_scenario(scenario)}
+    diagnostics={
+        "scene_count":len(items),"mode":_mode_for_scenario(scenario),
+        "sentinel1_pair":{
+            "available":bool(s1_ctx and s1_ctx.get("ok")),
+            "before":s1_before.get("datetime") if s1_before else None,
+            "after":s1_after.get("datetime") if s1_after else None
+        },
+        "nisar_products":len(nisar_items)
+    }
     if before and after and before.get("id")!=after.get("id"):
         mode=_mode_for_scenario(scenario)
         strategy="whole_aoi_part"
@@ -640,8 +753,24 @@ async def event_candidates(bbox: str, days: int=30, scenario: str="forest", max_
                     "changed_fraction":round(float(stats.get("changed_fraction",0.0)),4),
                     "analysis_geometry":"cloud_masked_pixel_polygon",
                     "analysis_resolution_m":round(float(st.get("resolution_m") or 0),1) if st.get("resolution_m") else None,
-                    "metrics":{k:round(v,4) if isinstance(v,float) else v for k,v in stats.items()}
+                    "metrics":{k:round(v,4) if isinstance(v,float) else v for k,v in stats.items()},
+                    "evidence":{}
                 })
+                _ev=events[-1]
+                _sar=_s1_evidence_for_bbox(s1_ctx,_ev.get("bbox"))
+                _ni=_nisar_context_for_bbox(nisar_items,_ev.get("bbox"),after.get("datetime") if after else None)
+                _ev["evidence"]={
+                    "sentinel2":{"signal":True,"mode":_ev.get("mode")},
+                    "sentinel1":_sar,
+                    "nisar":_ni,
+                    "firms":{"direct":False}
+                }
+                _ev["fusion_status"]=(
+                    "S2+S1+NISAR_CONTEXT" if _sar.get("support") and _ni.get("covered")
+                    else "S2+S1" if _sar.get("support")
+                    else "S2+NISAR_CONTEXT" if _ni.get("covered")
+                    else "S2_ONLY"
+                )
         events.sort(key=lambda e:(e.get("signal_index",0),e.get("area_ha",0)),reverse=True)
         events=events[:max_events]
         diagnostics.update({
@@ -675,7 +804,9 @@ async def event_candidates(bbox: str, days: int=30, scenario: str="forest", max_
             "source":"NASA FIRMS VIIRS",
             "geometry":{"type":"Point","coordinates":[lon,lat]},
             "point":[lon,lat],
-            "date":p.get("date"),"time":p.get("time"),"frp":p.get("frp"),"firms_confidence":p.get("confidence")
+            "date":p.get("date"),"time":p.get("time"),"frp":p.get("frp"),"firms_confidence":p.get("confidence"),
+            "evidence":{"firms":{"direct":True},"sentinel2":{"signal":False},"sentinel1":{"available":False},"nisar":{"covered":False}},
+            "fusion_status":"FIRMS_DIRECT"
         })
     _result={
         "ok":True,
@@ -684,6 +815,9 @@ async def event_candidates(bbox: str, days: int=30, scenario: str="forest", max_
         "count":len(events),
         "direct_count":sum(1 for e in events if e["class"]=="direct"),
         "candidate_count":sum(1 for e in events if e["class"]=="candidate"),
+        "sar_supported_count":sum(1 for e in events if (e.get("evidence") or {}).get("sentinel1",{}).get("support")),
+        "nisar_context_count":sum(1 for e in events if (e.get("evidence") or {}).get("nisar",{}).get("covered")),
+        "multisensor_count":sum(1 for e in events if e.get("fusion_status") in {"S2+S1","S2+S1+NISAR_CONTEXT"}),
         "firms_configured":bool(os.getenv("FIRMS_MAP_KEY")),
         "gfw_mode":"external-evidence",
         "diagnostics":diagnostics,
