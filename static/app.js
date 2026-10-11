@@ -271,10 +271,13 @@ function renderEventList(){
    ? `<div class="analysis-meta">Анализ: <b>${state.alertMeta.analysis_seconds} с</b> · ${d.strategy==='whole_aoi_part'?'единый AOI-растр':'fallback: выборочная детализация'}${d.analysis_resolution_m?' · ≈ '+d.analysis_resolution_m+' м/пиксель':''}${d.strategy!=='whole_aoi_part'?' · coarse '+(d.coarse_cells??'—')+' → refine '+(d.refined_cells??'—'):''}</div>`
    : '';
  const sourceHtml=`<div class="source-strip">
-   <span class="src on">Pixel-change engine: ON</span>
+   <span class="src on">S2 change: ON</span>
+   <span class="src on">S1 corroboration: ON</span>
+   <span class="src on">NISAR context: ON</span>
    <span class="src ${configured?'on':'off'}">FIRMS: ${configured?'ON':'нет ключа'}</span>
    <span class="src ext">GFW: внешний источник</span>
- </div>${perf}`;
+ </div>
+ <div class="fusion-summary">SAR поддержал: <b>${state.alertMeta?.sar_supported_count??0}</b> · NISAR покрытие: <b>${state.alertMeta?.nisar_context_count??0}</b> · multisensor: <b>${state.alertMeta?.multisensor_count??0}</b></div>${perf}`;
  const list=visibleEvents(),total=state.events.length;
  if($('findingStats'))$('findingStats').textContent=`Показано ${list.length} из ${total} сигналов${state.alertMeta?.diagnostics?.truncated?' · серверный safety-cap 500':''}.`;
  $('alertList').innerHTML=sourceHtml+(list.length?list.map(eventCard).join(''):`<div class="empty"><b>По текущему фильтру находок нет.</b><br>Снизьте минимальный индекс сигнала или включите другой тип.</div>`);
@@ -296,7 +299,7 @@ function renderEvents(payload){
     if(!l)continue;
     const idx=signalIndex(e),area=e.area_ha!=null?`<br>Площадь ≈ ${Number(e.area_ha).toFixed(2)} га`:'';
     const delta=e.delta_index!=null?`<br>${deltaLabel(e)}`:'';
-    l.bindPopup(`<b style="color:${col}">${esc(eventLabel(e))}</b><br><strong>${esc(e.title||'')}</strong><br>${esc(e.source||'')}${e.class==='candidate'?'<br>Индекс сигнала: '+idx+'/100':''}${area}${delta}`);
+    l.bindPopup(`<b style="color:${col}">${esc(eventLabel(e))}</b><br><strong>${esc(e.title||'')}</strong><br>${esc(e.source||'')}${e.class==='candidate'?'<br>Индекс сигнала: '+idx+'/100':''}${area}${delta}<br>Fusion: ${esc(e.fusion_status||'S2_ONLY')}`);
     state.eventLayers.push(l);state.eventLayerById[e.id]=l;
    }catch(err){}
  }
