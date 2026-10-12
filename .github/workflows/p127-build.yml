@@ -1,0 +1,149 @@
+name: p127-mvp-build
+
+on:
+  push:
+    branches: [p127-mobile-attestor-build]
+    paths:
+      - 'p127-mvp/**'
+      - '.github/workflows/p127-build.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'p127-mvp/**'
+      - '.github/workflows/p127-build.yml'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Reconstruct exact source bundle
+        shell: bash
+        run: |
+          cat p127-mvp/chunks/chunk_* | tr -d '\n\r' | base64 -d > /tmp/p127_source.zip
+          echo "cd7a755ac1835e283df14fc3e73c8f2f52f84015bd82382e18ca7e635f3d5779  /tmp/p127_source.zip" | sha256sum -c -
+          mkdir -p p127-mvp/work
+          unzip -q /tmp/p127_source.zip -d p127-mvp/work
+
+      - name: Harden Windows LAN address selection
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('p127-mvp/work/desktop/main.go')
+          s=p.read_text()
+          a=s.index('func privateIPv4() string {')
+          b=s.index('\nfunc openBrowser', a)
+          new='''func privateIPv4() string {
+\tifs, _ := net.Interfaces()
+\tvar p192, p10, p172 []string
+\tfor _, i := range ifs {
+\t\tif i.Flags&net.FlagUp == 0 || i.Flags&net.FlagLoopback != 0 { continue }
+\t\taddrs, _ := i.Addrs()
+\t\tfor _, a := range addrs {
+\t\t\tvar ip net.IP
+\t\t\tswitch x := a.(type) { case *net.IPNet: ip=x.IP; case *net.IPAddr: ip=x.IP }
+\t\t\tif ip == nil { continue }
+\t\t\tv := ip.To4(); if v == nil { continue }
+\t\t\tswitch {
+\t\t\tcase v[0] == 192 && v[1] == 168: p192=append(p192,v.String())
+\t\t\tcase v[0] == 10: p10=append(p10,v.String())
+\t\t\tcase v[0] == 172 && v[1] >= 16 && v[1] <= 31: p172=append(p172,v.String())
+\t\t\t}
+\t\t}
+\t}
+\tif len(p192)>0 { return p192[0] }
+\tif len(p10)>0 { return p10[0] }
+\tif len(p172)>0 { return p172[0] }
+\treturn "127.0.0.1"
+}'''
+          p.write_text(s[:a]+new+s[b:])
+          PY
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install Android SDK components
+        shell: bash
+        run: |
+          export ANDROID_HOME=/usr/local/lib/android/sdk
+          export ANDROID_SDK_ROOT=$ANDROID_HOME
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" "platforms;android-35" "build-tools;35.0.0"
+          echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Build Android APK
+        working-directory: p127-mvp/work/android
+        run: gradle :app:assembleDebug --stacktrace
+
+      - name: Verify APK and stage embedded asset
+        shell: bash
+        run: |
+          APK=p127-mvp/work/android/app/build/outputs/apk/debug/app-debug.apk
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose "$APK"
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | tee /tmp/apk_badging.txt
+          mkdir -p p127-mvp/work/desktop/assets
+          cp "$APK" p127-mvp/work/desktop/assets/P127_Attestor_PocoC65.apk
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+
+      - name: Desktop verifier self-check
+        working-directory: p127-mvp/work/desktop
+        shell: bash
+        run: |
+          go mod tidy
+          go run . --self-check | tee /tmp/go_selfcheck.txt
+
+      - name: Build Windows and Linux verifier
+        working-directory: p127-mvp/work/desktop
+        shell: bash
+        run: |
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o p127.exe .
+          GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o p127-linux-amd64 .
+
+      - name: Built verifier HTTP smoke test
+        working-directory: p127-mvp/work/desktop
+        shell: bash
+        run: |
+          ./p127-linux-amd64 >/tmp/p127_http.log 2>&1 & PID=$!
+          trap 'kill $PID 2>/dev/null || true' EXIT
+          for i in $(seq 1 20); do
+            if curl -fsS http://127.0.0.1:8787/api/state | tee /tmp/http_state.json; then break; fi
+            sleep 0.5
+          done
+          grep -q '"version":"1.0.0"' /tmp/http_state.json
+          kill $PID || true
+          trap - EXIT
+
+      - name: Package release artifact
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp p127-mvp/work/desktop/p127.exe dist/
+          cp p127-mvp/work/desktop/p127-linux-amd64 dist/
+          cp p127-mvp/work/desktop/START_P127.cmd dist/
+          cp p127-mvp/work/desktop/README_RU.txt dist/
+          cp p127-mvp/work/desktop/assets/P127_Attestor_PocoC65.apk dist/
+          cp /tmp/apk_badging.txt dist/APK_BADGING.txt
+          cp /tmp/go_selfcheck.txt dist/VERIFIER_SELF_CHECK.txt
+          (cd p127-mvp/work && zip -qr "$GITHUB_WORKSPACE/dist/P127_MVP_SOURCE.zip" android desktop -x '*/build/*' 'desktop/assets/P127_Attestor_PocoC65.apk' 'desktop/p127.exe' 'desktop/p127-linux-amd64')
+          (cd dist && sha256sum P127_Attestor_PocoC65.apk p127.exe p127-linux-amd64 P127_MVP_SOURCE.zip > SHA256SUMS.txt)
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: P127_Mobile_Attestor_MVP_PocoC65
+          path: dist/
+          if-no-files-found: error
