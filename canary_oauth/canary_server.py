@@ -76,7 +76,10 @@ def prepare():
 def clock():return int(time.time())
 def fresh():return secrets.token_urlsafe(40)
 def hashed(value):return hmac.new(PEPPER.encode(),value.encode(),hashlib.sha256).hexdigest()
-def error(code,name):return JSONResponse({'error':name},status_code=code,headers={'Cache-Control':'no-store'})
+def error(code,name):
+    headers={'Cache-Control':'no-store'}
+    if code==401 and name=='unauthorized':headers['WWW-Authenticate']='Bearer error="invalid_token", resource_metadata="'+ISSUER+'/.well-known/oauth-protected-resource/mcp"'
+    return JSONResponse({'error':name},status_code=code,headers=headers)
 def count(db,name):
     assert name in ('refresh_token_issued','refresh_grant_received','refresh_success','access_validated')
     db.execute(text('INSERT INTO canary_event(name,total) VALUES (:n,1) ON CONFLICT (name) DO UPDATE SET total=canary_event.total+1'),{'n':name})
@@ -235,7 +238,7 @@ async def mcp(request:Request):
                 'serverInfo':{'name':'C-Lab OAuth Canary','version':'0.1.0'}}
     elif method=='tools/list':
         result={'tools':[{'name':'canary_control_health','description':'Synthetic OAuth continuity probe; no science access',
-               'inputSchema':{'type':'object','properties':{},'additionalProperties':False}}]}
+               'inputSchema':{'type':'object','properties':{},'additionalProperties':False},'annotations':{'readOnlyHint':True,'destructiveHint':False,'idempotentHint':True,'openWorldHint':False}}]}
     elif method=='tools/call' and req.get('params',{}).get('name')=='canary_control_health':
         result={'content':[{'type':'text','text':json.dumps({'component':'C-Lab OAuth Canary','ok':True,'science_access':False})}],'isError':False}
     else:
@@ -257,3 +260,4 @@ install_audit(_sys.modules[__name__])
 
 from .security_middleware import install as install_security
 install_security(_sys.modules[__name__])
+
