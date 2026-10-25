@@ -59,6 +59,14 @@ class RefreshRecovery(Base):
     expires=Column(Integer,nullable=False)
     successor_refresh_hash=Column(String(64),nullable=False)
 
+class FaultOnce(Base):
+    """One exact operator-configured canary failure; immutable consumed marker."""
+    __tablename__='canary_fault_once_v8'
+    run_id=Column(String(128),primary_key=True)
+    session_ref=Column(String(64),nullable=False)
+    epoch=Column(Integer,nullable=False)
+    had_idempotency=Column(Boolean,nullable=False)
+
 class OAuthTrace(Base):
     """Append-only sanitized request evidence; never bearer/assertion/code material."""
     __tablename__='canary_oauth_trace_v8'
@@ -136,7 +144,7 @@ def policy_binding(client=CLIENT):return hashed(ALLOWED_EMAIL+'|'+client+'|'+ISS
 
 def session_ref(fid):return hashed('canary-v8-session:'+str(fid))
 def trace(db,kind,fid,token_hash=None,expires=None,client_auth='none'):
-    assert kind in ('refresh_token_issued','refresh_grant_received','refresh_success','access_validated','access_expired')
+    assert kind in ('refresh_token_issued','refresh_grant_received','refresh_success','access_validated','access_expired','refresh_retry_bound','refresh_reply_suppressed')
     fam=db.get(Family,fid)
     assert fam is not None
     db.add(OAuthTrace(kind=kind,epoch=clock(),session_ref=session_ref(fid),
@@ -258,12 +266,30 @@ def create_recovery(db,row,old_hashed,attempt,client,response):
                encrypted_result=base64.b64encode(enc).decode(),nonce=nonce.hex(),expires=clock()+120,
                successor_refresh_hash=hashed(response['refresh_token'])))
 
+def suppress_one_committed_reply(db,fam,attempt):
+    # No public arming endpoint. Exact private operator env + native session + short deadline.
+    run=os.environ.get('CANARY_V8_FAULT_RUN','')
+    target=os.environ.get('CANARY_V8_FAULT_SESSION','')
+    try:until=int(os.environ.get('CANARY_V8_FAULT_UNTIL','0'))
+    except ValueError:return False
+    now=clock()
+    if (fam.client!=OPENAI_CIMD or re.fullmatch(r'CLAB-V8-LOSS-[A-Za-z0-9_-]{8,100}',run) is None
+        or re.fullmatch(r'[a-f0-9]{64}',target) is None or target!=session_ref(fam.id)
+        or not now<until<=now+1800):return False
+    consumed=db.execute(text('INSERT INTO canary_fault_once_v8 (run_id,session_ref,epoch,had_idempotency) '
+        'VALUES (:run,:session,:epoch,:idem) ON CONFLICT (run_id) DO NOTHING RETURNING run_id'),
+        {'run':run,'session':target,'epoch':now,'idem':attempt is not None}).scalar_one_or_none()
+    if consumed is None:return False
+    trace(db,'refresh_reply_suppressed',fam.id,client_auth='none')
+    return True
+
 def rotate_refresh(db,raw_refresh,client=CLIENT,attempt=None):
     count(db,'refresh_grant_received')
     row=db.execute(select(Token).where(Token.hashed==hashed(raw_refresh),
                Token.kind=='refresh').with_for_update()).scalar_one_or_none()
     if not row:return error(400,'invalid_grant')
     trace(db,'refresh_grant_received',row.family,row.hashed,row.expires)
+    if attempt is not None:trace(db,'refresh_retry_bound',row.family,row.hashed,row.expires)
     fam=db.execute(select(Family).where(Family.id==row.family).with_for_update()).scalar_one()
     if fam.revoked or fam.client!=client or fam.resource!=ISSUER+'/mcp' or fam.policy_hash!=policy_binding(client) or 'offline_access' not in fam.scope.split() or row.expires<=clock():
         return error(400,'invalid_grant')
@@ -287,6 +313,7 @@ def rotate_refresh(db,raw_refresh,client=CLIENT,attempt=None):
     if attempt is not None:create_recovery(db,row,old_hashed,attempt,client,result)
     count(db,'refresh_success')
     trace(db,'refresh_success',fam.id,row.hashed,row.expires)
+    if suppress_one_committed_reply(db,fam,attempt):result['__v8_drop_committed']=True
     return result
 
 @app.post('/token')
@@ -330,6 +357,8 @@ async def token(request:Request):
         with Db.begin() as db:
             result=rotate_refresh(db,form.get('refresh_token',''),form['client_id'],retry)
         if isinstance(result,Response):return result
+        if result.pop('__v8_drop_committed',False):
+            return JSONResponse({'error':'temporarily_unavailable','error_description':'Controlled one-time canary response loss after durable rotation'},status_code=503,headers={'Retry-After':'1','Cache-Control':'no-store'})
         return JSONResponse(result,headers={'Cache-Control':'no-store','Pragma':'no-cache'})
     return error(400,'unsupported_grant_type')
 @app.post('/mcp')
