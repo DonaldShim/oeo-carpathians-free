@@ -59,6 +59,18 @@ class RefreshRecovery(Base):
     expires=Column(Integer,nullable=False)
     successor_refresh_hash=Column(String(64),nullable=False)
 
+class OAuthTrace(Base):
+    """Append-only sanitized request evidence; never bearer/assertion/code material."""
+    __tablename__='canary_oauth_trace_v8'
+    seq=Column(Integer,primary_key=True)
+    kind=Column(String(32),nullable=False)
+    epoch=Column(Integer,nullable=False)
+    session_ref=Column(String(64),nullable=False)
+    token_ref=Column(String(64),nullable=True)
+    client=Column(String(128),nullable=False)
+    client_auth=Column(String(32),nullable=False)
+    token_expires=Column(Integer,nullable=True)
+
 class Event(Base):
     __tablename__='canary_event'
     name=Column(String(64),primary_key=True)
@@ -122,6 +134,16 @@ def count(db,name):
     db.execute(text('INSERT INTO canary_event(name,total) VALUES (:n,1) ON CONFLICT (name) DO UPDATE SET total=canary_event.total+1'),{'n':name})
 def policy_binding(client=CLIENT):return hashed(ALLOWED_EMAIL+'|'+client+'|'+ISSUER+'/mcp')
 
+def session_ref(fid):return hashed('canary-v8-session:'+str(fid))
+def trace(db,kind,fid,token_hash=None,expires=None,client_auth='none'):
+    assert kind in ('refresh_token_issued','refresh_grant_received','refresh_success','access_validated','access_expired')
+    fam=db.get(Family,fid)
+    assert fam is not None
+    db.add(OAuthTrace(kind=kind,epoch=clock(),session_ref=session_ref(fid),
+        token_ref=hashed('canary-v8-token:'+token_hash) if token_hash else None,
+        client=fam.client,client_auth=client_auth,token_expires=expires))
+
+
 def mint(db,fid,scope='c_lab_canary.read offline_access'):
     at,rt=fresh(),fresh()
     db.add(Token(hashed=hashed(at),kind='access',family=fid,expires=clock()+90))
@@ -129,6 +151,7 @@ def mint(db,fid,scope='c_lab_canary.read offline_access'):
     if 'offline_access' in scope.split():
         db.add(Token(hashed=hashed(rt),kind='refresh',family=fid,expires=clock()+86400))
         count(db,'refresh_token_issued')
+        trace(db,'refresh_token_issued',fid,hashed(at),clock()+90)
         result['refresh_token']=rt
     return result
 @app.get('/healthz')
@@ -240,6 +263,7 @@ def rotate_refresh(db,raw_refresh,client=CLIENT,attempt=None):
     row=db.execute(select(Token).where(Token.hashed==hashed(raw_refresh),
                Token.kind=='refresh').with_for_update()).scalar_one_or_none()
     if not row:return error(400,'invalid_grant')
+    trace(db,'refresh_grant_received',row.family,row.hashed,row.expires)
     fam=db.execute(select(Family).where(Family.id==row.family).with_for_update()).scalar_one()
     if fam.revoked or fam.client!=client or fam.resource!=ISSUER+'/mcp' or fam.policy_hash!=policy_binding(client) or 'offline_access' not in fam.scope.split() or row.expires<=clock():
         return error(400,'invalid_grant')
@@ -262,6 +286,7 @@ def rotate_refresh(db,raw_refresh,client=CLIENT,attempt=None):
     result=mint(db,fam.id,fam.scope)
     if attempt is not None:create_recovery(db,row,old_hashed,attempt,client,result)
     count(db,'refresh_success')
+    trace(db,'refresh_success',fam.id,row.hashed,row.expires)
     return result
 
 @app.post('/token')
@@ -276,6 +301,9 @@ async def token(request:Request):
     if any(len(v)!=1 for v in parsed.values()):return error(400,'invalid_request')
     form={k:v[0] for k,v in parsed.items()}
     if form.get('client_id') not in CLIENTS or form.get('resource')!=ISSUER+'/mcp':
+        return error(400,'invalid_client')
+    # AS advertises only none: reject unexpected client authentication, never silently ignore assertions.
+    if request.headers.get('authorization') or any(k in form for k in ('client_assertion','client_assertion_type','client_secret')):
         return error(400,'invalid_client')
     kind=form.get('grant_type')
     if kind=='authorization_code':
@@ -338,10 +366,14 @@ async def mcp(request:Request):
     with Db.begin() as db:
         item=db.execute(select(Token).where(Token.hashed==hashed(bearer[7:]),Token.kind=='access')).scalar_one_or_none()
         fam=db.get(Family,item.family) if item else None
+        if item is not None and fam is not None and item.expires<=clock():
+            trace(db,'access_expired',fam.id,item.hashed,item.expires,'bearer')
         if not item or item.expires<=clock() or not fam or fam.revoked or fam.resource!=ISSUER+'/mcp' or fam.client not in CLIENTS or fam.policy_hash!=policy_binding(fam.client) or 'c_lab_canary.read' not in fam.scope.split():
             return link_required()
         count(db,'access_validated')
-    result={'content':[{'type':'text','text':json.dumps({'component':'C-Lab OAuth Canary','ok':True,'science_access':False})}],'isError':False}
+        trace(db,'access_validated',fam.id,item.hashed,item.expires,'bearer')
+        observed={'audit_session':session_ref(fam.id),'oauth_client_id':fam.client,'resource':fam.resource,'scope':fam.scope,'server_epoch':clock(),'access_expires_at':item.expires,'access_issued_at':item.expires-90,'client_origin_proof':'PUBLIC_CLIENT_NOT_CRYPTOGRAPHICALLY_AUTHENTICATED'}
+    result={'content':[{'type':'text','text':json.dumps(dict(component='C-Lab OAuth Canary',ok=True,science_access=False,**observed))}],'isError':False}
     return {'jsonrpc':'2.0','id':req.get('id'),'result':result}
 @app.get('/internal/event-counts')
 def events(request:Request):
