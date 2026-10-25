@@ -58,7 +58,7 @@ PEPPER=os.environ.get('TOKEN_HASH_PEPPER','')
 READY=(os.environ.get('CANARY_OAUTH_ENABLED')=='1' and ISSUER.startswith('https://') and
        GOOGLE_ID and GOOGLE_SECRET and ALLOWED_EMAIL and len(PEPPER)>=32 and
        DATABASE_URL.startswith(('postgresql://','postgresql+psycopg://')))
-dbengine=create_engine(DATABASE_URL,pool_pre_ping=True) if READY else None
+dbengine=create_engine(("postgresql+psycopg://"+DATABASE_URL.split("://",1)[1] if DATABASE_URL.startswith("postgresql://") else DATABASE_URL),pool_pre_ping=True) if READY else None
 Db=sessionmaker(bind=dbengine) if READY else None
 app=FastAPI(title='C-Lab OAuth Canary',docs_url=None,redoc_url=None,openapi_url=None)
 
@@ -131,10 +131,11 @@ async def google_callback(request:Request):
             signed=response.json()['id_token']
         key=jwt.PyJWKClient('https://www.googleapis.com/oauth2/v3/certs').get_signing_key_from_jwt(signed)
         identity=jwt.decode(signed,key.key,algorithms=['RS256'],audience=GOOGLE_ID,
-                  issuer=['accounts.google.com','https://accounts.google.com'],leeway=30)
+                  issuer=['accounts.google.com','https://accounts.google.com'],leeway=30,
+                  options={'require':['exp','iat','iss','aud','sub']})
     except Exception:
         return error(401,'invalid_google_identity')
-    if (not identity.get('sub') or identity.get('email_verified') is not True or
+    if (not identity.get('sub') or (identity.get('azp') and identity.get('azp')!=GOOGLE_ID) or identity.get('email_verified') is not True or
         str(identity.get('email','')).lower()!=ALLOWED_EMAIL or
         not hmac.compare_digest(hashed(str(identity.get('nonce',''))),nonce_hash)):
         return error(403,'identity_not_allowed')
@@ -200,10 +201,11 @@ async def mcp(request:Request):
         count(db,'access_validated')
     try:req=await request.json()
     except Exception:return error(400,'invalid_json')
+    if not isinstance(req,dict) or req.get('jsonrpc')!='2.0':return error(400,'invalid_json_rpc')
     method=req.get('method')
     if method=='notifications/initialized':return Response(status_code=202)
     if method=='initialize':
-        result={'protocolVersion':'2025-03-26','capabilities':{'tools':{}},
+        result={'protocolVersion':'2025-11-25','capabilities':{'tools':{}},
                 'serverInfo':{'name':'C-Lab OAuth Canary','version':'0.1.0'}}
     elif method=='tools/list':
         result={'tools':[{'name':'canary_control_health','description':'Synthetic OAuth continuity probe; no science access',
