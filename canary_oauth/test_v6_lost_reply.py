@@ -1,7 +1,9 @@
 """V6 loss-of-successful-refresh-response replay using actual isolated canary source.
 NO production tokens, NO Google/ChatGPT credentials, NO internet requests.
 """
-import os, secrets, asyncio, json
+import os, secrets, asyncio, json, sys
+from pathlib import Path
+sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 os.environ["CANARY_REFRESH_RECOVERY_KEY"]=secrets.token_urlsafe(64)
 import httpx
 from sqlalchemy import create_engine, select
