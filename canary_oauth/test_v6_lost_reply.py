@@ -5,6 +5,7 @@ import os, secrets, asyncio, json, sys
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 os.environ["CANARY_REFRESH_RECOVERY_KEY"]=secrets.token_urlsafe(64)
+os.environ["CANARY_V6_RECOVERY_ENABLED"]="1"
 import httpx
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
