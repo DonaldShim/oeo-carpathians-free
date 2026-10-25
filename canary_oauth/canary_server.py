@@ -57,8 +57,8 @@ DATABASE_URL=os.environ.get('DATABASE_URL','')
 PEPPER=os.environ.get('TOKEN_HASH_PEPPER','')
 READY=(os.environ.get('CANARY_OAUTH_ENABLED')=='1' and ISSUER.startswith('https://') and
        GOOGLE_ID and GOOGLE_SECRET and ALLOWED_EMAIL and len(PEPPER)>=32 and
-       DATABASE_URL.startswith(('postgresql://','postgresql+psycopg://')))
-dbengine=create_engine(("postgresql+psycopg://"+DATABASE_URL.split("://",1)[1] if DATABASE_URL.startswith("postgresql://") else DATABASE_URL),pool_pre_ping=True) if READY else None
+       DATABASE_URL.startswith(('postgres://','postgresql://','postgresql+psycopg://')))
+dbengine=create_engine(("postgresql+psycopg://"+DATABASE_URL.split("://",1)[1] if DATABASE_URL.startswith(('postgres://','postgresql://')) else DATABASE_URL),pool_pre_ping=True) if READY else None
 Db=sessionmaker(bind=dbengine) if READY else None
 app=FastAPI(title='C-Lab OAuth Canary',docs_url=None,redoc_url=None,openapi_url=None)
 
