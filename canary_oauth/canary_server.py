@@ -4,7 +4,7 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from urllib.parse import urlencode, parse_qs
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse, RedirectResponse
-from sqlalchemy import create_engine, Column, Integer, String, Boolean, ForeignKey, select, text
+from sqlalchemy import create_engine, Column, Integer, String, Boolean, ForeignKey, select, text, func
 from sqlalchemy.orm import declarative_base, sessionmaker
 import jwt, httpx
 
@@ -401,7 +401,26 @@ async def mcp(request:Request):
             return link_required()
         count(db,'access_validated')
         trace(db,'access_validated',fam.id,item.hashed,item.expires,'bearer')
-        observed={'audit_session':session_ref(fam.id),'oauth_client_id':fam.client,'resource':fam.resource,'scope':fam.scope,'server_epoch':clock(),'access_expires_at':item.expires,'access_issued_at':item.expires-90,'client_origin_proof':'PUBLIC_CLIENT_NOT_CRYPTOGRAPHICALLY_AUTHENTICATED'}
+        # Session-local, bearer-authorized aggregate: no token refs, secrets or other family events.
+        own_session=session_ref(fam.id)
+        session_counts=dict(db.execute(
+            select(OAuthTrace.kind,func.count(OAuthTrace.seq))
+            .where(OAuthTrace.session_ref==own_session).group_by(OAuthTrace.kind)).all())
+        latest_refresh=db.execute(
+            select(OAuthTrace.kind,OAuthTrace.epoch,OAuthTrace.client_auth)
+            .where(OAuthTrace.session_ref==own_session,
+                   OAuthTrace.kind.in_(('refresh_grant_received','refresh_success')))
+            .order_by(OAuthTrace.seq.desc()).limit(8)).all()
+        session_proof={
+            'source':'postgresql_canary_oauth_trace_v8',
+            'session_scoped':True,
+            'refresh_grant_received':session_counts.get('refresh_grant_received',0),
+            'refresh_success':session_counts.get('refresh_success',0),
+            'refresh_token_issued':session_counts.get('refresh_token_issued',0),
+            'access_validated':session_counts.get('access_validated',0),
+            'recent_refresh_events':[{'kind':e.kind,'epoch':e.epoch,'client_auth':e.client_auth}
+                                     for e in reversed(latest_refresh)]}
+        observed={'audit_session':session_ref(fam.id),'oauth_client_id':fam.client,'resource':fam.resource,'scope':fam.scope,'server_epoch':clock(),'access_expires_at':item.expires,'access_issued_at':item.expires-90,'client_origin_proof':'PUBLIC_CLIENT_NOT_CRYPTOGRAPHICALLY_AUTHENTICATED','session_oauth_audit':session_proof}
     result={'content':[{'type':'text','text':json.dumps(dict(component='C-Lab OAuth Canary',ok=True,science_access=False,**observed))}],'isError':False}
     return {'jsonrpc':'2.0','id':req.get('id'),'result':result}
 @app.get('/internal/event-counts')
