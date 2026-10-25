@@ -1,5 +1,6 @@
 """Isolated C-Lab OAuth Canary. No C-Fabric tools, fail closed by default."""
 import os, time, hmac, hashlib, base64, secrets, json, re
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from urllib.parse import urlencode, parse_qs
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse, RedirectResponse
@@ -48,6 +49,16 @@ class Token(Base):
     family=Column(Integer,ForeignKey('canary_family.id'),nullable=False)
     expires=Column(Integer,nullable=False)
     consumed_at=Column(Integer,nullable=True)
+class RefreshRecovery(Base):
+    """Encrypted bounded receipt, accessible only with old bearer AND a secret client attempt nonce."""
+    __tablename__='canary_refresh_recovery'
+    old_token_id=Column(Integer,ForeignKey('canary_token.id'),primary_key=True)
+    attempt_hash=Column(String(64),nullable=False)
+    encrypted_result=Column(String(4096),nullable=False)
+    nonce=Column(String(32),nullable=False)
+    expires=Column(Integer,nullable=False)
+    successor_refresh_hash=Column(String(64),nullable=False)
+
 class Event(Base):
     __tablename__='canary_event'
     name=Column(String(64),primary_key=True)
@@ -177,7 +188,30 @@ async def google_callback(request:Request):
         db.add(Code(code_hash=hashed(authorization_code),user_hash=hashed(identity['sub']),
                     challenge=challenge,client=auth_client,redirect=auth_redirect,scope=scope,expires=clock()+90))
     return RedirectResponse(auth_redirect+'?'+urlencode({'code':authorization_code,'state':client_state,'iss':ISSUER}),302)
-def rotate_refresh(db,raw_refresh,client=CLIENT):
+def recovery_key():
+    key=os.environ.get('CANARY_REFRESH_RECOVERY_KEY','')
+    if len(key)<43:return None
+    return hashlib.sha256(b'C-LAB-CANARY-RECOVERY-V1\\0'+key.encode()).digest()
+
+def retry_digest(old_hashed,attempt):
+    return hashed('retry-attempt-v1:'+old_hashed+':'+attempt)
+
+def decrypt_recovery(entry,old_hashed,attempt,client):
+    aad=(old_hashed+'|'+entry.attempt_hash+'|'+client+'|'+ISSUER+'/mcp').encode()
+    data=AESGCM(recovery_key()).decrypt(bytes.fromhex(entry.nonce),
+                base64.b64decode(entry.encrypted_result),aad)
+    return json.loads(data)
+
+def create_recovery(db,row,old_hashed,attempt,client,response):
+    digest=retry_digest(old_hashed,attempt)
+    aad=(old_hashed+'|'+digest+'|'+client+'|'+ISSUER+'/mcp').encode()
+    nonce=secrets.token_bytes(12)
+    enc=AESGCM(recovery_key()).encrypt(nonce,json.dumps(response,separators=(',',':')).encode(),aad)
+    db.add(RefreshRecovery(old_token_id=row.id,attempt_hash=digest,
+               encrypted_result=base64.b64encode(enc).decode(),nonce=nonce.hex(),expires=clock()+120,
+               successor_refresh_hash=hashed(response['refresh_token'])))
+
+def rotate_refresh(db,raw_refresh,client=CLIENT,attempt=None):
     count(db,'refresh_grant_received')
     row=db.execute(select(Token).where(Token.hashed==hashed(raw_refresh),
                Token.kind=='refresh').with_for_update()).scalar_one_or_none()
@@ -185,11 +219,24 @@ def rotate_refresh(db,raw_refresh,client=CLIENT):
     fam=db.execute(select(Family).where(Family.id==row.family).with_for_update()).scalar_one()
     if fam.revoked or fam.client!=client or fam.resource!=ISSUER+'/mcp' or fam.policy_hash!=policy_binding(client) or 'offline_access' not in fam.scope.split() or row.expires<=clock():
         return error(400,'invalid_grant')
+    old_hashed=row.hashed
     if row.consumed_at is not None:
+        if attempt is not None:
+            receipt=db.get(RefreshRecovery,row.id)
+            if (receipt is not None and receipt.expires>=clock() and
+                hmac.compare_digest(receipt.attempt_hash,retry_digest(old_hashed,attempt))):
+                successor=db.execute(select(Token).where(Token.hashed==receipt.successor_refresh_hash,
+                          Token.kind=='refresh')).scalar_one_or_none()
+                if (successor is None or successor.family!=fam.id or
+                        successor.consumed_at is not None or successor.expires<=clock()):
+                    return error(400,'invalid_grant')
+                try:return decrypt_recovery(receipt,old_hashed,attempt,client)
+                except Exception:return error(503,'recovery_unavailable')
         if clock()-row.consumed_at>3:fam.revoked=True
         return error(400,'invalid_grant')
     row.consumed_at=clock()
     result=mint(db,fam.id,fam.scope)
+    if attempt is not None:create_recovery(db,row,old_hashed,attempt,client,result)
     count(db,'refresh_success')
     return result
 
@@ -222,8 +269,13 @@ async def token(request:Request):
             result=mint(db,family.id,row.scope)
         return JSONResponse(result,headers={'Cache-Control':'no-store','Pragma':'no-cache'})
     if kind=='refresh_token':
+        retry=request.headers.get('Idempotency-Key')
+        if retry is not None:
+            if re.fullmatch(r'[A-Za-z0-9_-]{43,128}',retry) is None:
+                return error(400,'invalid_idempotency_key')
+            if recovery_key() is None:return error(503,'recovery_not_configured')
         with Db.begin() as db:
-            result=rotate_refresh(db,form.get('refresh_token',''),form['client_id'])
+            result=rotate_refresh(db,form.get('refresh_token',''),form['client_id'],retry)
         if isinstance(result,Response):return result
         return JSONResponse(result,headers={'Cache-Control':'no-store','Pragma':'no-cache'})
     return error(400,'unsupported_grant_type')
