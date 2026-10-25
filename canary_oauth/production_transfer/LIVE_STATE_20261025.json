@@ -1,0 +1,30 @@
+{
+  "schema": "C_LAB_PROD_OAUTH_TRANSFER_PREFLIGHT_V1",
+  "status": "OPEN",
+  "scope": "existing canonical c-lab-gcp-control OAuth layer only",
+  "production_resource": "https://c-lab-gcp-control-w7neqnzura-ew.a.run.app",
+  "production_google_issuer": "https://accounts.google.com",
+  "production_client_id": "PRESERVE_APPROVED_EXISTING_CLIENT_NO_READBACK",
+  "scopes": [
+    "openid",
+    "email",
+    "profile"
+  ],
+  "callback": "https://chatgpt.com/connector_platform_oauth_redirect",
+  "canary_native_chatgpt_refresh_certified": true,
+  "production_google_refresh_certified": false,
+  "oauth_authoritative_source_verified": false,
+  "known_latest_production_revision": "UNVERIFIED_CURRENT_REVISION_READ_FROM_CLOUD_RUN_BEFORE_PATCH",
+  "allowed_change": "offline refresh in same authenticated Google OAuth configuration only; exact build provenance first",
+  "candidate_traffic_percent": "MUST_BE_0",
+  "no_rdc": true,
+  "no_prod_science_changes": true,
+  "no_fabric_changes": true,
+  "no_token_or_password_export": true,
+  "preflight": {
+    "tests": "10/10_PASS_SYNTHETIC",
+    "real_check": "OPEN_SEVEN_GATES",
+    "no_live_mutation": true
+  },
+  "blocker": "AUTHORITATIVE_OAUTH_BUILD_INPUT_ACCESS"
+}
