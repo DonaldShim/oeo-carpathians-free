@@ -92,6 +92,18 @@ app=FastAPI(title='C-Lab OAuth Canary',docs_url=None,redoc_url=None,openapi_url=
 def prepare():
     if dbengine is not None:
         Base.metadata.create_all(dbengine)
+    if os.environ.get('CANARY_V6_STARTUP_PG_AUDIT')=='1':
+        import threading
+        def isolated_audit():
+            try:
+                from .v6_postgres_replay import run
+                report=run(__import__(__name__,fromlist=['Base']))
+                clean={k:report.get(k) for k in ('status','backend','checks','check_count','concurrency','engine_reconstruction','isolated_schema_removed','live_token_tables_mutated','failure_class','failed_check','elapsed_seconds')}
+                print('CANARY_V6_PG_CERT '+json.dumps(clean,separators=(',',':')),flush=True)
+            except Exception as e:
+                print('CANARY_V6_PG_CERT '+json.dumps({'status':'REJECTED','failure_class':type(e).__name__,'secret_exposed':False}),flush=True)
+        threading.Thread(target=isolated_audit,name='canary-v6-postgres-isolated-audit',daemon=True).start()
+
         # Additive migration; existing ChatGPT intents/codes keep their original binding.
         with dbengine.begin() as db:
             for table in ('canary_auth_intent','canary_auth_code'):
@@ -270,6 +282,7 @@ async def token(request:Request):
         return JSONResponse(result,headers={'Cache-Control':'no-store','Pragma':'no-cache'})
     if kind=='refresh_token':
         retry=request.headers.get('Idempotency-Key')
+        if retry is not None and os.environ.get('CANARY_V6_RECOVERY_ENABLED')!='1':return error(503,'recovery_disabled')
         if retry is not None:
             if re.fullmatch(r'[A-Za-z0-9_-]{43,128}',retry) is None:
                 return error(400,'invalid_idempotency_key')
