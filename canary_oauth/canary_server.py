@@ -191,7 +191,7 @@ async def google_callback(request:Request):
 def recovery_key():
     key=os.environ.get('CANARY_REFRESH_RECOVERY_KEY','')
     if len(key)<43:return None
-    return hashlib.sha256(b'C-LAB-CANARY-RECOVERY-V1\\0'+key.encode()).digest()
+    return hashlib.sha256(b'C-LAB-CANARY-RECOVERY-V1\0'+key.encode()).digest()
 
 def retry_digest(old_hashed,attempt):
     return hashed('retry-attempt-v1:'+old_hashed+':'+attempt)
