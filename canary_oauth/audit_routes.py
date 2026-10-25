@@ -38,7 +38,8 @@ def install(s):
   with s.Db.begin() as db:
    events={x.name:x.total for x in db.scalars(select(s.Event))}
    traces=list(db.scalars(select(s.OAuthTrace).order_by(s.OAuthTrace.seq.desc()).limit(201)))
+   fault_rows=[{k:getattr(t,k) for k in ('run_id','session_ref','epoch','had_idempotency')} for t in db.scalars(select(s.FaultOnce).order_by(s.FaultOnce.epoch.desc()).limit(20))]
    trace_rows=[{k:getattr(t,k) for k in ('seq','kind','epoch','session_ref','token_ref','client','client_auth','token_expires')} for t in reversed(traces[:200])]
    low,high,total=db.execute(select(func.min(s.Token.expires),func.max(s.Token.expires),func.count()).where(s.Token.kind=='access')).one()
-  return JSONResponse({'trace_v8':trace_rows,'trace_more':len(traces)>200,'events':events,'database_backend':s.dbengine.dialect.name,'observed_epoch':s.clock(),'access_ttl_seconds':90,'access_expiry_min':low,'access_expiry_max':high,'access_tokens_count':total,'oauth_enabled':bool(s.READY)},headers={'Cache-Control':'no-store','Referrer-Policy':'no-referrer'})
+  return JSONResponse({'fault_once_v8':fault_rows,'trace_v8':trace_rows,'trace_more':len(traces)>200,'events':events,'database_backend':s.dbengine.dialect.name,'observed_epoch':s.clock(),'access_ttl_seconds':90,'access_expiry_min':low,'access_expiry_max':high,'access_tokens_count':total,'oauth_enabled':bool(s.READY)},headers={'Cache-Control':'no-store','Referrer-Policy':'no-referrer'})
 
