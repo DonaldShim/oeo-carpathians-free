@@ -75,7 +75,8 @@ CLIENT='clab-canary-chatgpt-20261025'
 CALLBACK='https://chatgpt.com/connector_platform_oauth_redirect'
 PROBE_CLIENT='C_LAB_OAUTH_PROBE_V1'
 PROBE_CALLBACK='http://127.0.0.1:8769/callback'
-CLIENTS={CLIENT:CALLBACK,PROBE_CLIENT:PROBE_CALLBACK}
+OPENAI_CIMD='https://chatgpt.com/oauth/client.json'
+CLIENTS={CLIENT:CALLBACK,PROBE_CLIENT:PROBE_CALLBACK,OPENAI_CIMD:CALLBACK}
 GOOGLE_ID=os.environ.get('GOOGLE_OAUTH_CLIENT_ID','')
 GOOGLE_SECRET=os.environ.get('GOOGLE_OAUTH_CLIENT_SECRET','')
 ALLOWED_EMAIL=os.environ.get('GOOGLE_ALLOWED_EMAIL','').lower().strip()
@@ -138,6 +139,7 @@ def metadata():
       'token_endpoint':ISSUER+'/token','grant_types_supported':['authorization_code','refresh_token'],
       'response_types_supported':['code'],'code_challenge_methods_supported':['S256'],
       'authorization_response_iss_parameter_supported':True,
+      'client_id_metadata_document_supported':True,
       'token_endpoint_auth_methods_supported':['none'],
       'scopes_supported':['c_lab_canary.read','offline_access']}
 @app.get('/.well-known/oauth-protected-resource')
@@ -159,6 +161,16 @@ def authorize(request:Request):
         'c_lab_canary.read' not in q.get('scope','').split() or
         not q.get('state') or len(q['state'])>512):
         return error(400,'invalid_request')
+    if q['client_id']==OPENAI_CIMD:
+        # Fetch only the exact hardcoded OpenAI metadata URL; never an arbitrary client-supplied URL.
+        try:
+            meta=httpx.get(OPENAI_CIMD,timeout=6,follow_redirects=False)
+            meta.raise_for_status()
+            doc=meta.json()
+            if (doc.get('client_id')!=OPENAI_CIMD or CALLBACK not in doc.get('redirect_uris',[])
+                or 'none' not in doc.get('token_endpoint_auth_methods_supported',[])):
+                return error(400,'cimd_metadata_mismatch')
+        except Exception:return error(503,'cimd_metadata_unavailable')
     state,nonce=fresh(),fresh()
     with Db.begin() as db:
         db.add(Intent(state_hash=hashed(state),nonce_hash=hashed(nonce),
@@ -295,33 +307,41 @@ async def token(request:Request):
 @app.post('/mcp')
 async def mcp(request:Request):
     if not READY:return error(503,'canary_not_configured')
-    bearer=request.headers.get('authorization','')
-    if not bearer.startswith('Bearer '):
-        return JSONResponse({'error':'unauthorized'},status_code=401,headers={'WWW-Authenticate':
-          'Bearer resource_metadata="'+ISSUER+'/.well-known/oauth-protected-resource/mcp", error="invalid_token", error_description="OAuth login required for the canary read tool"'})
-    with Db.begin() as db:
-        item=db.execute(select(Token).where(Token.hashed==hashed(bearer[7:]),Token.kind=='access')).scalar_one_or_none()
-        fam=db.get(Family,item.family) if item else None
-        if not item or item.expires<=clock() or not fam or fam.revoked or fam.resource!=ISSUER+'/mcp' or fam.client not in CLIENTS or fam.policy_hash!=policy_binding(fam.client) or 'c_lab_canary.read' not in fam.scope.split():
-            return error(401,'unauthorized')
-        count(db,'access_validated')
     try:req=await request.json()
     except Exception:return error(400,'invalid_json')
     if not isinstance(req,dict) or req.get('jsonrpc')!='2.0':return error(400,'invalid_json_rpc')
     method=req.get('method')
+    # Public MCP discovery exposes only a synthetic tool, never user or science data.
     if method=='notifications/initialized':return Response(status_code=202)
     if method=='initialize':
         protocol=req.get('params',{}).get('protocolVersion','2025-03-26')
         if protocol not in ('2025-11-25','2025-06-18','2025-03-26','2024-11-05'):return error(400,'unsupported_protocol')
         result={'protocolVersion':protocol,'capabilities':{'tools':{}},
-                'serverInfo':{'name':'C-Lab OAuth Canary','version':'0.1.0'}}
-    elif method=='tools/list':
-        result={'tools':[{'name':'canary_control_health','description':'Synthetic OAuth continuity probe; no science access',
-               'inputSchema':{'type':'object','properties':{},'additionalProperties':False},'securitySchemes':[{'type':'oauth2','scopes':['c_lab_canary.read']}],'annotations':{'readOnlyHint':True,'destructiveHint':False,'idempotentHint':True,'openWorldHint':False}}]}
-    elif method=='tools/call' and req.get('params',{}).get('name')=='canary_control_health':
-        result={'content':[{'type':'text','text':json.dumps({'component':'C-Lab OAuth Canary','ok':True,'science_access':False})}],'isError':False}
-    else:
+                'serverInfo':{'name':'C-Lab OAuth Canary','version':'0.2.0'}}
+        return {'jsonrpc':'2.0','id':req.get('id'),'result':result}
+    if method=='tools/list':
+        result={'tools':[{'name':'canary_control_health',
+                'description':'Synthetic read-only OAuth continuity probe; no production C-Lab access',
+                'inputSchema':{'type':'object','properties':{},'additionalProperties':False},
+                'securitySchemes':[{'type':'oauth2','scopes':['c_lab_canary.read']}],
+                'annotations':{'readOnlyHint':True,'destructiveHint':False,'idempotentHint':True,'openWorldHint':False}}]}
+        return {'jsonrpc':'2.0','id':req.get('id'),'result':result}
+    if method!='tools/call' or not isinstance(req.get('params'),dict) or req['params'].get('name')!='canary_control_health':
         return {'jsonrpc':'2.0','id':req.get('id'),'error':{'code':-32601,'message':'Method not found'}}
+    challenge='Bearer resource_metadata="'+ISSUER+'/.well-known/oauth-protected-resource/mcp", error="invalid_token", error_description="OAuth login required for the canary read tool"'
+    def link_required():
+        return {'jsonrpc':'2.0','id':req.get('id'),'result':{
+          'content':[{'type':'text','text':'Authentication required'}],
+          'isError':True,'_meta':{'mcp/www_authenticate':[challenge]}}}
+    bearer=request.headers.get('authorization','')
+    if not bearer.startswith('Bearer '):return link_required()
+    with Db.begin() as db:
+        item=db.execute(select(Token).where(Token.hashed==hashed(bearer[7:]),Token.kind=='access')).scalar_one_or_none()
+        fam=db.get(Family,item.family) if item else None
+        if not item or item.expires<=clock() or not fam or fam.revoked or fam.resource!=ISSUER+'/mcp' or fam.client not in CLIENTS or fam.policy_hash!=policy_binding(fam.client) or 'c_lab_canary.read' not in fam.scope.split():
+            return link_required()
+        count(db,'access_validated')
+    result={'content':[{'type':'text','text':json.dumps({'component':'C-Lab OAuth Canary','ok':True,'science_access':False})}],'isError':False}
     return {'jsonrpc':'2.0','id':req.get('id'),'result':result}
 @app.get('/internal/event-counts')
 def events(request:Request):
