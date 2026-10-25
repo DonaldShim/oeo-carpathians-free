@@ -10,6 +10,8 @@ import jwt, httpx
 Base=declarative_base()
 class Intent(Base):
     __tablename__='canary_auth_intent'
+    client=Column(String(128),nullable=False,default='clab-canary-chatgpt-20261025',server_default='clab-canary-chatgpt-20261025')
+    redirect=Column(String(512),nullable=False,default='https://chatgpt.com/connector_platform_oauth_redirect',server_default='https://chatgpt.com/connector_platform_oauth_redirect')
     id=Column(Integer,primary_key=True)
     state_hash=Column(String(64),unique=True,nullable=False)
     nonce_hash=Column(String(64),nullable=False)
@@ -20,6 +22,8 @@ class Intent(Base):
     used=Column(Boolean,default=False,nullable=False)
 class Code(Base):
     __tablename__='canary_auth_code'
+    client=Column(String(128),nullable=False,default='clab-canary-chatgpt-20261025',server_default='clab-canary-chatgpt-20261025')
+    redirect=Column(String(512),nullable=False,default='https://chatgpt.com/connector_platform_oauth_redirect',server_default='https://chatgpt.com/connector_platform_oauth_redirect')
     id=Column(Integer,primary_key=True)
     code_hash=Column(String(64),unique=True,nullable=False)
     user_hash=Column(String(64),nullable=False)
@@ -58,6 +62,9 @@ class RateLimit(Base):
 ISSUER=os.environ.get('CANARY_ISSUER','').rstrip('/')
 CLIENT='clab-canary-chatgpt-20261025'
 CALLBACK='https://chatgpt.com/connector_platform_oauth_redirect'
+PROBE_CLIENT='C_LAB_OAUTH_PROBE_V1'
+PROBE_CALLBACK='http://127.0.0.1:8769/callback'
+CLIENTS={CLIENT:CALLBACK,PROBE_CLIENT:PROBE_CALLBACK}
 GOOGLE_ID=os.environ.get('GOOGLE_OAUTH_CLIENT_ID','')
 GOOGLE_SECRET=os.environ.get('GOOGLE_OAUTH_CLIENT_SECRET','')
 ALLOWED_EMAIL=os.environ.get('GOOGLE_ALLOWED_EMAIL','').lower().strip()
@@ -72,7 +79,13 @@ app=FastAPI(title='C-Lab OAuth Canary',docs_url=None,redoc_url=None,openapi_url=
 
 @app.on_event('startup')
 def prepare():
-    if dbengine is not None: Base.metadata.create_all(dbengine)
+    if dbengine is not None:
+        Base.metadata.create_all(dbengine)
+        # Additive migration; existing ChatGPT intents/codes keep their original binding.
+        with dbengine.begin() as db:
+            for table in ('canary_auth_intent','canary_auth_code'):
+                db.execute(text("ALTER TABLE "+table+" ADD COLUMN IF NOT EXISTS client VARCHAR(128) NOT NULL DEFAULT 'clab-canary-chatgpt-20261025'"))
+                db.execute(text("ALTER TABLE "+table+" ADD COLUMN IF NOT EXISTS redirect VARCHAR(512) NOT NULL DEFAULT 'https://chatgpt.com/connector_platform_oauth_redirect'"))
 def clock():return int(time.time())
 def fresh():return secrets.token_urlsafe(40)
 def hashed(value):return hmac.new(PEPPER.encode(),value.encode(),hashlib.sha256).hexdigest()
@@ -83,7 +96,7 @@ def error(code,name):
 def count(db,name):
     assert name in ('refresh_token_issued','refresh_grant_received','refresh_success','access_validated')
     db.execute(text('INSERT INTO canary_event(name,total) VALUES (:n,1) ON CONFLICT (name) DO UPDATE SET total=canary_event.total+1'),{'n':name})
-def policy_binding():return hashed(ALLOWED_EMAIL+'|'+CLIENT+'|'+ISSUER+'/mcp')
+def policy_binding(client=CLIENT):return hashed(ALLOWED_EMAIL+'|'+client+'|'+ISSUER+'/mcp')
 
 def mint(db,fid,scope='c_lab_canary.read offline_access'):
     at,rt=fresh(),fresh()
@@ -117,7 +130,7 @@ def authorize(request:Request):
     scopes=q.get('scope','').split()
     if not scopes or len(scopes)!=len(set(scopes)) or set(scopes)-{'c_lab_canary.read','offline_access'}:return error(400,'invalid_scope')
     challenge=q.get('code_challenge','')
-    if (q.get('client_id')!=CLIENT or q.get('redirect_uri')!=CALLBACK or
+    if (q.get('client_id') not in CLIENTS or q.get('redirect_uri')!=CLIENTS.get(q.get('client_id')) or
         q.get('resource')!=ISSUER+'/mcp' or q.get('response_type')!='code' or
         q.get('code_challenge_method')!='S256' or re.fullmatch(r'[A-Za-z0-9_-]{43}',challenge) is None or
         'c_lab_canary.read' not in q.get('scope','').split() or
@@ -126,7 +139,7 @@ def authorize(request:Request):
     state,nonce=fresh(),fresh()
     with Db.begin() as db:
         db.add(Intent(state_hash=hashed(state),nonce_hash=hashed(nonce),
-                      client_state=q['state'],challenge=challenge,
+                      client_state=q['state'],client=q['client_id'],redirect=q['redirect_uri'],challenge=challenge,
                       scope=q.get('scope',''),expires=clock()+300))
     params={'client_id':GOOGLE_ID,'redirect_uri':ISSUER+'/google/callback','response_type':'code',
             'scope':'openid email profile','nonce':nonce,'state':state,'prompt':'select_account'}
@@ -141,6 +154,7 @@ async def google_callback(request:Request):
         if not row or row.used or row.expires<=clock():return error(400,'invalid_state')
         row.used=True
         nonce_hash,challenge,client_state,scope=row.nonce_hash,row.challenge,row.client_state,row.scope
+        auth_client,auth_redirect=row.client,row.redirect
     try:
         async with httpx.AsyncClient(timeout=8) as client:
             response=await client.post('https://oauth2.googleapis.com/token',data={
@@ -161,15 +175,15 @@ async def google_callback(request:Request):
     authorization_code=fresh()
     with Db.begin() as db:
         db.add(Code(code_hash=hashed(authorization_code),user_hash=hashed(identity['sub']),
-                    challenge=challenge,scope=scope,expires=clock()+90))
-    return RedirectResponse(CALLBACK+'?'+urlencode({'code':authorization_code,'state':client_state,'iss':ISSUER}),302)
-def rotate_refresh(db,raw_refresh):
+                    challenge=challenge,client=auth_client,redirect=auth_redirect,scope=scope,expires=clock()+90))
+    return RedirectResponse(auth_redirect+'?'+urlencode({'code':authorization_code,'state':client_state,'iss':ISSUER}),302)
+def rotate_refresh(db,raw_refresh,client=CLIENT):
     count(db,'refresh_grant_received')
     row=db.execute(select(Token).where(Token.hashed==hashed(raw_refresh),
                Token.kind=='refresh').with_for_update()).scalar_one_or_none()
     if not row:return error(400,'invalid_grant')
     fam=db.execute(select(Family).where(Family.id==row.family).with_for_update()).scalar_one()
-    if fam.revoked or fam.client!=CLIENT or fam.resource!=ISSUER+'/mcp' or fam.policy_hash!=policy_binding() or 'offline_access' not in fam.scope.split() or row.expires<=clock():
+    if fam.revoked or fam.client!=client or fam.resource!=ISSUER+'/mcp' or fam.policy_hash!=policy_binding(client) or 'offline_access' not in fam.scope.split() or row.expires<=clock():
         return error(400,'invalid_grant')
     if row.consumed_at is not None:
         if clock()-row.consumed_at>3:fam.revoked=True
@@ -190,26 +204,26 @@ async def token(request:Request):
     except (ValueError,UnicodeError):return error(400,'invalid_request')
     if any(len(v)!=1 for v in parsed.values()):return error(400,'invalid_request')
     form={k:v[0] for k,v in parsed.items()}
-    if form.get('client_id')!=CLIENT or form.get('resource')!=ISSUER+'/mcp':
+    if form.get('client_id') not in CLIENTS or form.get('resource')!=ISSUER+'/mcp':
         return error(400,'invalid_client')
     kind=form.get('grant_type')
     if kind=='authorization_code':
         verifier=form.get('code_verifier','')
-        if not (re.fullmatch(r'[A-Za-z0-9._~-]{43,128}',verifier) is not None and form.get('redirect_uri')==CALLBACK):
+        if not (re.fullmatch(r'[A-Za-z0-9._~-]{43,128}',verifier) is not None and form.get('redirect_uri')==CLIENTS[form['client_id']]):
             return error(400,'invalid_grant')
         challenge=base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).decode().rstrip('=')
         with Db.begin() as db:
             row=db.execute(select(Code).where(Code.code_hash==hashed(form.get('code',''))).with_for_update()).scalar_one_or_none()
-            if not row or row.used or row.expires<=clock() or not hmac.compare_digest(challenge,row.challenge):
+            if not row or row.used or row.expires<=clock() or row.client!=form['client_id'] or row.redirect!=form['redirect_uri'] or not hmac.compare_digest(challenge,row.challenge):
                 return error(400,'invalid_grant')
             row.used=True
-            family=Family(user_hash=row.user_hash,client=CLIENT,resource=ISSUER+'/mcp',scope=row.scope,policy_hash=policy_binding())
+            family=Family(user_hash=row.user_hash,client=row.client,resource=ISSUER+'/mcp',scope=row.scope,policy_hash=policy_binding(row.client))
             db.add(family);db.flush()
             result=mint(db,family.id,row.scope)
         return JSONResponse(result,headers={'Cache-Control':'no-store','Pragma':'no-cache'})
     if kind=='refresh_token':
         with Db.begin() as db:
-            result=rotate_refresh(db,form.get('refresh_token',''))
+            result=rotate_refresh(db,form.get('refresh_token',''),form['client_id'])
         if isinstance(result,Response):return result
         return JSONResponse(result,headers={'Cache-Control':'no-store','Pragma':'no-cache'})
     return error(400,'unsupported_grant_type')
@@ -223,7 +237,7 @@ async def mcp(request:Request):
     with Db.begin() as db:
         item=db.execute(select(Token).where(Token.hashed==hashed(bearer[7:]),Token.kind=='access')).scalar_one_or_none()
         fam=db.get(Family,item.family) if item else None
-        if not item or item.expires<=clock() or not fam or fam.revoked or fam.resource!=ISSUER+'/mcp' or fam.client!=CLIENT or fam.policy_hash!=policy_binding() or 'c_lab_canary.read' not in fam.scope.split():
+        if not item or item.expires<=clock() or not fam or fam.revoked or fam.resource!=ISSUER+'/mcp' or fam.client not in CLIENTS or fam.policy_hash!=policy_binding(fam.client) or 'c_lab_canary.read' not in fam.scope.split():
             return error(401,'unauthorized')
         count(db,'access_validated')
     try:req=await request.json()
@@ -260,4 +274,3 @@ install_audit(_sys.modules[__name__])
 
 from .security_middleware import install as install_security
 install_security(_sys.modules[__name__])
-
