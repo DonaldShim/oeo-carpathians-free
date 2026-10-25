@@ -219,7 +219,7 @@ async def mcp(request:Request):
     bearer=request.headers.get('authorization','')
     if not bearer.startswith('Bearer '):
         return JSONResponse({'error':'unauthorized'},status_code=401,headers={'WWW-Authenticate':
-          'Bearer resource_metadata="'+ISSUER+'/.well-known/oauth-protected-resource/mcp"'})
+          'Bearer resource_metadata="'+ISSUER+'/.well-known/oauth-protected-resource/mcp", error="invalid_token", error_description="OAuth login required for the canary read tool"'})
     with Db.begin() as db:
         item=db.execute(select(Token).where(Token.hashed==hashed(bearer[7:]),Token.kind=='access')).scalar_one_or_none()
         fam=db.get(Family,item.family) if item else None
@@ -238,7 +238,7 @@ async def mcp(request:Request):
                 'serverInfo':{'name':'C-Lab OAuth Canary','version':'0.1.0'}}
     elif method=='tools/list':
         result={'tools':[{'name':'canary_control_health','description':'Synthetic OAuth continuity probe; no science access',
-               'inputSchema':{'type':'object','properties':{},'additionalProperties':False},'annotations':{'readOnlyHint':True,'destructiveHint':False,'idempotentHint':True,'openWorldHint':False}}]}
+               'inputSchema':{'type':'object','properties':{},'additionalProperties':False},'securitySchemes':[{'type':'oauth2','scopes':['c_lab_canary.read']}],'annotations':{'readOnlyHint':True,'destructiveHint':False,'idempotentHint':True,'openWorldHint':False}}]}
     elif method=='tools/call' and req.get('params',{}).get('name')=='canary_control_health':
         result={'content':[{'type':'text','text':json.dumps({'component':'C-Lab OAuth Canary','ok':True,'science_access':False})}],'isError':False}
     else:
