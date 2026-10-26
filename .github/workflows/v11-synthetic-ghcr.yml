@@ -1,0 +1,94 @@
+name: C-Lab V11 synthetic image (GHCR)
+on:
+  push:
+    branches:
+      - c-lab-oauth-v11-zero-traffic-synthetic-20261025
+    paths:
+      - .github/workflows/v11-synthetic-ghcr.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+  packages: write
+concurrency:
+  group: clab-v11-synthetic-ghcr
+  cancel-in-progress: false
+jobs:
+  verify-and-publish:
+    if: github.repository == 'DonaldShim/oeo-carpathians-free'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout exact source snapshot
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Verify approved ZIP SHA, member allowlist, and extract
+        env:
+          SRC_ZIP: canary_oauth/production_transfer/artifacts/C_LAB_OAUTH_V11_ZERO_TRAFFIC_CANDIDATE_20261025.zip
+          V11_ROOT: /tmp/c-lab-v11-verified
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s  %s\n' 'd2c7352ddcd0aad52a92f8fda24f88f672e6669286e5532a649e1554e0968be1' "$SRC_ZIP" | sha256sum --check
+          python3 - <<'PY'
+          import os, pathlib, stat, zipfile
+          src = pathlib.Path(os.environ['SRC_ZIP'])
+          target = pathlib.Path(os.environ['V11_ROOT'])
+          allowed = {'app.py','test_app.py','cloudrun_gate.py','test_cloudrun_gate.py','requirements.txt','Dockerfile','README_RU.md','CLOUD_RUN_STAGE_EVIDENCE.json','CERTIFICATE.json','SHA256_MANIFEST.json'}
+          with zipfile.ZipFile(src) as z:
+              assert set(z.namelist()) == allowed, 'UNEXPECTED_ARCHIVE_MEMBERS'
+              assert all(not stat.S_ISLNK(f.external_attr >> 16) for f in z.infolist()), 'SYMLINK_NOT_ALLOWED'
+              assert z.testzip() is None, 'ZIP_CRC_FAILURE'
+              target.mkdir(parents=True, exist_ok=False)
+              z.extractall(target)
+          assert set(p.name for p in target.iterdir()) == allowed
+          dockerfile = (target / 'Dockerfile').read_text()
+          assert 'COPY app.py /app/' in dockerfile
+          assert 'COPY requirements.txt /app/' in dockerfile
+          assert 'COPY . ' not in dockerfile
+          app = (target / 'app.py').read_text()
+          assert "real_identity_provider_not_configured" in app
+          assert "'production_access':False" in app and "'science_access':False" in app
+          print('V11_SOURCE_ADMISSION=PASS')
+          PY
+      - name: Setup Python test runner
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Run complete synthetic-only replay
+        working-directory: /tmp/c-lab-v11-verified
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check -r requirements.txt 'pytest>=8,<10' 'httpx>=0.27,<1'
+          python -m pytest -q test_app.py test_cloudrun_gate.py
+      - name: Build exact admitted synthetic Docker context
+        working-directory: /tmp/c-lab-v11-verified
+        shell: bash
+        env:
+          IMAGE: ghcr.io/donaldshim/clab-oauth-v11-synthetic
+          COMMIT: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          docker build --pull \
+            --label 'org.opencontainers.image.source=https://github.com/DonaldShim/oeo-carpathians-free' \
+            --label 'org.opencontainers.image.description=Test-only isolated OAuth V11; no production/C-Fabric connection' \
+            -t "$IMAGE:sha-$COMMIT" \
+            -f Dockerfile .
+          docker image inspect "$IMAGE:sha-$COMMIT" >/dev/null
+          echo "CONTAINER_SYNTHETIC_ONLY=PASS"
+      - name: Push only synthetic image to GHCR
+        shell: bash
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_ACTOR: ${{ github.actor }}
+          IMAGE: ghcr.io/donaldshim/clab-oauth-v11-synthetic
+          COMMIT: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_ACTOR" --password-stdin >/dev/null
+          docker push "$IMAGE:sha-$COMMIT" | tee /tmp/clab-v11-ghcr-push.log
+          grep -Eq 'digest: sha256:[0-9a-f]{64}' /tmp/clab-v11-ghcr-push.log
+          echo "GHCR_PUSH=PASS"
+          echo "GHCR_IMAGE=$IMAGE:sha-$COMMIT"
+          docker logout ghcr.io >/dev/null
