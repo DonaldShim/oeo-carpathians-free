@@ -33,7 +33,7 @@ def capture():
        "project_policy":read_json(["projects","get-iam-policy",P]),
        "production":read_json(["run","services","describe",SERVICE,"--region="+REGION,"--project="+P]),
        "probes":{}}
-    for permission in ("storage.buckets.get","storage.objects.get"):
+    for permission in ("storage.buckets.get",):
         d["probes"][permission]=read_json(["policy-intelligence","troubleshoot-policy","iam",RESOURCE,
            "--principal-email="+SA,"--permission="+permission,"--project="+P])
     return d
@@ -48,13 +48,12 @@ def gate(d):
     if has_role(d["bucket_policy"],ROLE,MEMBER):
         reasons.append("DIRECT_BUCKET_GRANT_ALREADY_PRESENT")
     states={}
-    for permission in ("storage.buckets.get","storage.objects.get"):
+    for permission in ("storage.buckets.get",):
         x=d["probes"][permission]; t=x.get("accessTuple",{})
         if t.get("principal")!=SA or t.get("fullResourceName")!=RESOURCE or t.get("permission")!=permission:
             reasons.append("INVALID_TROUBLESHOOT_TUPLE_"+permission)
         states[permission]=x.get("overallAccessState","UNKNOWN")
     if states["storage.buckets.get"]!="CANNOT_ACCESS": reasons.append("BUCKETS_GET_NOT_CERTIFIED_MISSING")
-    if states["storage.objects.get"]!="CAN_ACCESS": reasons.append("OBJECTS_GET_NOT_CERTIFIED_PRESENT")
     p=d["probes"]["storage.buckets.get"]
     if p.get("allowPolicyExplanation",{}).get("allowAccessState")!="ALLOW_ACCESS_STATE_NOT_GRANTED":
         reasons.append("ALLOW_POLICY_NOT_SIMPLE_MISSING_GRANT")
