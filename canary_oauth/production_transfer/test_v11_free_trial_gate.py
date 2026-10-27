@@ -2,7 +2,9 @@ import importlib.util
 from pathlib import Path
 from unittest.mock import patch
 import sys
-spec = importlib.util.spec_from_file_location('gate', '/mnt/data/v11_free_trial_private_deploy.py')
+source = Path(__file__).with_name('v11_free_trial_private_deploy.py')
+if not source.exists(): source = Path(__file__).parent.parent / 'v11_free_trial_private_deploy.py'
+spec = importlib.util.spec_from_file_location('gate', str(source))
 gate = importlib.util.module_from_spec(spec); spec.loader.exec_module(gate)
 
 class MockG:
