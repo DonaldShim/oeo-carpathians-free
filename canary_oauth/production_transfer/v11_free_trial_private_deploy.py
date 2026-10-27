@@ -79,14 +79,22 @@ def account_check():
             'financial_policy': 'NO_CARD_CHARGE_FREE_TRIAL_ONLY',
             'warning': 'Billing project API cannot certify trial vs paid. Operator screenshot required today.'}
 
-def preflight():
+def preflight(selected_test_sa=None):
     finance = account_check()
     sa_list = gjson('iam', 'service-accounts', 'list', '--project='+PROJECT)
     accounts = [x['email'] for x in sa_list if x.get('email', '').endswith('@'+PROJECT+'.iam.gserviceaccount.com')
                 and 'v11' in x['email'].split('@')[0] and 'test' in x['email'].split('@')[0]]
-    if len(accounts) != 1:
-        raise GateError('EXPECTED_EXACTLY_ONE_V11_TEST_SERVICE_IDENTITY: found '+str(len(accounts)))
-    sa = accounts[0]
+    accounts = sorted(set(accounts))
+    if selected_test_sa is not None:
+        if selected_test_sa not in accounts:
+            raise GateError('EXPLICIT_V11_TEST_IDENTITY_NOT_FOUND_OR_INVALID: '+selected_test_sa)
+        sa = selected_test_sa
+    elif len(accounts) == 1:
+        sa = accounts[0]
+    else:
+        raise GateError('V11_TEST_IDENTITY_AMBIGUOUS: found '+str(len(accounts))+
+                        '; candidates='+','.join(accounts)+
+                        '; select one exact email with --test-service-account only after IAM review')
     policy = gjson('projects', 'get-iam-policy', PROJECT)
     project_bindings = [b['role'] for b in policy.get('bindings', [])
                         if 'serviceAccount:'+sa in b.get('members', [])]
@@ -148,6 +156,8 @@ def rollback_test():
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--execute', action='store_true', help='Execute test-only Cloud Run deployment')
+    ap.add_argument('--test-service-account', type=str, default=None,
+                    help='Exact v11-test service identity after read-only IAM audit')
     ap.add_argument('--accept-trial-credit', action='store_true',
                     help='Acknowledge: trial credit may be spent; no claim of Always Free')
     args = ap.parse_args()
@@ -158,7 +168,7 @@ def main():
     output = Path.home()/'c-lab-v11-artifacts'/'V11_TRIAL_GATE_RECEIPT_20261027.json'
     output.parent.mkdir(exist_ok=True)
     try:
-        result['preflight'] = preflight()
+        result['preflight'] = preflight(args.test_service_account)
         result['state'] = 'PREFLIGHT_PASS_READ_ONLY'
         if args.execute:
             if not args.accept_trial_credit:
