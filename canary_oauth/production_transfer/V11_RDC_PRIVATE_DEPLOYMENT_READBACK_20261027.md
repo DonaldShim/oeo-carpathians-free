@@ -72,3 +72,15 @@ A 2026-09-03 resolution in Google Developer forums identifies **Cloud Run Google
 https://discuss.google.dev/t/cloud-run-services-return-google-branded-404-on-public-run-app-url-despite-ready-true-correct-iam-ingress-all-reproduced-across-2-projects-2-accounts-zero-request-logs/381607/6
 
 This is a **third-party diagnosis and a plausible carrier**, not a certified Google-wide policy or a fix replayed on this V11 image. Our internal A/B observations (`/healthz` => GFE HTML 404; `/healthz/` => FastAPI 307; `/authorize` => FastAPI 503 under authenticated proxy) are consistent with that mechanism. **Do not rebuild/redeploy the immutable V11 image merely to claim closure.** If a successor test-only source is approved, add a `/health` alias, publish under a new digest with independent tests, and demonstrate 200 from the protected endpoint before closing the route gate.
+
+## Bounded resource readback after deployment
+
+Fresh `gcloud run services describe` confirmed the **deployed** test revision (not just CLI requested flags):
+- CPU limit: `1`; memory: `256Mi`
+- `containerConcurrency=1`; timeout: `15` seconds
+- `autoscaling.knative.dev/maxScale=1`; no nonzero minScale was reported
+- `run.googleapis.com/cpu-throttling=true`
+- Ready revision remains `c-lab-oauth-v11-test-00001-wqm`
+- Production Ready revision remains `c-lab-gcp-control-custody-v1-prod-20261020`
+
+These bounds reduce exposure but do not certify literally zero trial-credit consumption. The existing Free Trial billing contract, not the Cloud Run Always Free quota, limits risk of card charges while Free Trial remains unupgraded.
