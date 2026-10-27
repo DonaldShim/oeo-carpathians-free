@@ -118,3 +118,16 @@ The Google Cloud Billing API `billingEnabled=true` **does not prove the account 
 **Current closure**: `FREE_TRIAL_NO_CARD_CHARGE_ELIGIBILITY = AFFIRMED (dated UI evidence)`; `LIVE_IAM_PREFLIGHT = OPEN`; `PRIVATE_TEST_DEPLOYMENT = NOT_EXECUTED`; `NATIVE_GOOGLE_OAUTH_REFRESH = OPEN`.
 
 Do not misrepresent this policy update as an actual deployed revision.
+
+
+## 2026-10-27 — IAM ambiguity and artifact hash fix (Cloud Shell observation)
+
+Fresh Cloud Shell readback: active project correct, production revision `c-lab-gcp-control-custody-v1-prod-20261020` readable; test service NOT_FOUND; first preflight receipt `STOP_GATE_OR_DEPLOY_FAILURE`, `executed=false`, `EXPECTED_EXACTLY_ONE_V11_TEST_SERVICE_IDENTITY: found 2`. No deployment/rollback was performed.
+
+**Material handoff defect repaired:** Old expected local script SHA `c4d7ac3e070ed6e615c2f348d43f8da5d470627d7a236d36ec09178a59153625` did NOT match prior GitHub file, whose verified SHA was `e43b45e4923b488a79602f46dcb03144a1ecde8700cc241fef813c26a4436f5b`. Never continue after failed `sha256sum`; especially never invoke `--execute` on unmatched content.
+
+**V11 gate revision:** Explicit `--test-service-account EMAIL` option; when more than one candidate matches, fail closed and print exact candidate identities. Selection must be user-audited, and original checks of project IAM roles, existing service use, production revision and traffic, billing, digest, private invoker, zero traffic and rollback remain in place. Local mock regression expanded to **11/11** (3 additional tests: ambiguity blocks, explicit verified selection succeeds, unknown identity rejects). These are synthetic only; Cloud Shell live IAM is still OPEN.
+
+**Canonical revised GitHub source** `canary_oauth/production_transfer/v11_free_trial_private_deploy.py` (commit `5ffde91441205336d74b645a1ed091be950a93e8`), exact SHA-256 `207dd56cf236008fb1b8cfa963b943042b64434136c8754397ac01faa7be22e3`. Tests `canary_oauth/production_transfer/test_v11_free_trial_gate.py`, SHA-256 `1434057f9198cc90d7471221b115f1978c505ccd9078f4622a3ce3bc7671c68f`.
+
+**Read-only next action**: retrieve exact revised source with SHA check using `if sha256sum -c ...; then python3 ...; fi`. An ambiguous identity gate is the correct SAFE result until one identity is manually chosen after IAM readback. Do not blindly take first identity or loosen the role gate. Production and C-Fabric remain unchanged.
