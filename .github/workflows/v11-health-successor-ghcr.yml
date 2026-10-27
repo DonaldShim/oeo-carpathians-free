@@ -1,0 +1,122 @@
+name: C-Lab V11 health successor candidate (GHCR)
+on:
+  push:
+    branches:
+      - c-lab-oauth-v11-zero-traffic-synthetic-20261025
+    paths:
+      - .github/workflows/v11-health-successor-ghcr.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+  packages: write
+concurrency:
+  group: clab-v11-health-successor
+  cancel-in-progress: false
+jobs:
+  build-health-successor:
+    if: github.repository == 'DonaldShim/oeo-carpathians-free'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout fixed Git revision
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Verify immutable V11 source and add ONLY health alias
+        env:
+          SRC_ZIP: canary_oauth/production_transfer/artifacts/C_LAB_OAUTH_V11_ZERO_TRAFFIC_CANDIDATE_20261025.zip
+          WORK_DIR: /tmp/clab-v11-health-source
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s  %s\n' 'd2c7352ddcd0aad52a92f8fda24f88f672e6669286e5532a649e1554e0968be1' "$SRC_ZIP" | sha256sum --check
+          python3 - <<'PY'
+          import pathlib, os, stat, zipfile
+          root=pathlib.Path(os.environ['WORK_DIR'])
+          zip_path=pathlib.Path(os.environ['SRC_ZIP'])
+          allowed={'app.py','test_app.py','cloudrun_gate.py','test_cloudrun_gate.py','requirements.txt','Dockerfile','README_RU.md','CLOUD_RUN_STAGE_EVIDENCE.json','CERTIFICATE.json','SHA256_MANIFEST.json'}
+          with zipfile.ZipFile(zip_path) as z:
+              assert set(z.namelist()) == allowed
+              assert all(not stat.S_ISLNK(m.external_attr >> 16) for m in z.infolist())
+              assert z.testzip() is None
+              root.mkdir(parents=True,exist_ok=False)
+              z.extractall(root)
+          app_path=root/'app.py'
+          original=app_path.read_text(encoding='utf-8')
+          marker="@app.get('/healthz')"
+          assert original.count(marker)==1
+          assert "@app.get('/health')" not in original
+          assert "real_identity_provider_not_configured" in original
+          assert "'production_access':False" in original
+          assert "'science_access':False" in original
+          fixed=original.replace(marker,"@app.get('/health')\n"+marker,1)
+          assert fixed.replace("@app.get('/health')\n"+marker,marker,1)==original
+          app_path.write_text(fixed,encoding='utf-8')
+          d=(root/'Dockerfile').read_text()
+          assert 'COPY app.py /app/' in d
+          assert 'COPY requirements.txt /app/' in d
+          assert 'COPY . ' not in d
+          (root/'test_health_successor.py').write_text("""
+          import os
+          os.environ['C_LAB_V11_SYNTHETIC_ONLY']='1'
+          os.environ['C_LAB_V11_ISSUER']='https://oauth-v11.invalid'
+          from fastapi.testclient import TestClient
+          from app import app
+          c=TestClient(app)
+          def test_health_alias_200():
+              r=c.get('/health')
+              assert r.status_code == 200, r.text
+              assert r.json()['synthetic_only'] is True
+              assert r.json()['production_access'] is False
+              assert r.json()['science_access'] is False
+          def test_original_route_200():
+              r=c.get('/healthz')
+              assert r.status_code == 200, r.text
+              assert r.json()==c.get('/health').json()
+          def test_authorization_fails_closed():
+              r=c.get('/authorize')
+              assert r.status_code==503
+              assert r.json()['error']=='real_identity_provider_not_configured'
+          """.lstrip())
+          print('HEALTH_ALIAS_EXACT_SOURCE_DIFF_PASS')
+          PY
+      - name: Prepare isolated test runner
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Run original synthetic tests plus successor tests
+        working-directory: /tmp/clab-v11-health-source
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install -r requirements.txt 'pytest>=8,<10' 'httpx>=0.27,<1'
+          python -m pytest -q test_app.py test_cloudrun_gate.py test_health_successor.py
+      - name: Build exact successor image
+        working-directory: /tmp/clab-v11-health-source
+        shell: bash
+        env:
+          COMMIT: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          IMAGE=ghcr.io/donaldshim/clab-oauth-v11-synthetic:health-"${COMMIT}"
+          docker build --pull \
+            --label 'org.opencontainers.image.source=https://github.com/DonaldShim/oeo-carpathians-free' \
+            --label 'org.opencontainers.image.description=V11 health-only synthetic successor; no production/real OAuth provider' \
+            -t "$IMAGE" -f Dockerfile .
+          docker inspect "$IMAGE" >/dev/null
+          echo 'EXACT_HEALTH_SUCCESSOR_IMAGE_BUILD=PASS'
+      - name: Publish GHCR immutable image
+        shell: bash
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_ACTOR: ${{ github.actor }}
+          COMMIT: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          IMAGE=ghcr.io/donaldshim/clab-oauth-v11-synthetic:health-"${COMMIT}"
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_ACTOR" --password-stdin >/dev/null
+          docker push "$IMAGE" | tee /tmp/health-v11-ghcr-push.log
+          grep -Eq 'digest: sha256:[0-9a-f]{64}' /tmp/health-v11-ghcr-push.log
+          echo 'HEALTH_SUCCESSOR_GHCR_PUSH_PASS'
+          echo "PUBLISHED_IMAGE=$IMAGE"
+          docker logout ghcr.io >/dev/null
