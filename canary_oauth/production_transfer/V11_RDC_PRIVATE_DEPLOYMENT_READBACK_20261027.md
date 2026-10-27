@@ -65,3 +65,10 @@ Final health readback **2026-10-27T13:25:04–05Z** via canonical C-Lab GCP Cont
 - **Proved (scoped)**: real deployment and specified readback properties, not Google refresh.
 - **Open**: `/healthz` 404, live OAuth/ChatGPT native refresh, comprehensive rollback execution, durable free-tier cost beyond the dated Free Trial contract.
 - **Next admissible move**: diagnose reserved/misrouted `/healthz` route without modifying production; do not deploy another test service or replay old scripts.
+
+## Root-cause lead for the `/healthz` residual
+
+A 2026-09-03 resolution in Google Developer forums identifies **Cloud Run Google Frontend interception of some URL paths ending in `z`**, specifically `/healthz`, producing Google's HTML 404 before reaching the container. It reports that changing the path to `/health` resolved the symptom:
+https://discuss.google.dev/t/cloud-run-services-return-google-branded-404-on-public-run-app-url-despite-ready-true-correct-iam-ingress-all-reproduced-across-2-projects-2-accounts-zero-request-logs/381607/6
+
+This is a **third-party diagnosis and a plausible carrier**, not a certified Google-wide policy or a fix replayed on this V11 image. Our internal A/B observations (`/healthz` => GFE HTML 404; `/healthz/` => FastAPI 307; `/authorize` => FastAPI 503 under authenticated proxy) are consistent with that mechanism. **Do not rebuild/redeploy the immutable V11 image merely to claim closure.** If a successor test-only source is approved, add a `/health` alias, publish under a new digest with independent tests, and demonstrate 200 from the protected endpoint before closing the route gate.
