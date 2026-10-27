@@ -8,8 +8,8 @@ spec = importlib.util.spec_from_file_location('gate', str(source))
 gate = importlib.util.module_from_spec(spec); spec.loader.exec_module(gate)
 
 class MockG:
-    def __init__(self, billing_enabled=True, sa_roles=None, target=False, public=False, prod_drift=False):
-        self.calls=[]; self.billing_enabled=billing_enabled; self.sa_roles=sa_roles or []; self.target=target; self.public=public; self.prod_drift=prod_drift
+    def __init__(self, billing_enabled=True, sa_roles=None, target=False, public=False, prod_drift=False, two_identities=False):
+        self.calls=[]; self.billing_enabled=billing_enabled; self.sa_roles=sa_roles or []; self.target=target; self.public=public; self.prod_drift=prod_drift; self.two_identities=two_identities
         self.sa='c-lab-oauth-v11-test@'+gate.PROJECT+'.iam.gserviceaccount.com'
     def cmd(self,*a,allow_missing=False):
         self.calls.append(a)
@@ -23,7 +23,7 @@ class MockG:
         if a[:3]==('billing','projects','describe'):
             return {'billingEnabled':self.billing_enabled,'billingAccountName':gate.BILLING}
         if a[:3]==('iam','service-accounts','list'):
-            return [{'email':self.sa}]
+            return [{'email':self.sa}]+([{'email':'c-lab-oauth-v11-test-extra@'+gate.PROJECT+'.iam.gserviceaccount.com'}] if self.two_identities else [])
         if a[:2]==('projects','get-iam-policy'):
             return {'bindings':[{'role':role,'members':['serviceAccount:'+self.sa]} for role in self.sa_roles]}
         if a[:3]==('run','services','list'):
@@ -102,7 +102,29 @@ def check_image_pin_and_tag(j,c):
         assert kw in arg
     assert '--image='+gate.IMAGE in arg
 
+@patch.object(gate,'gcloud')
+@patch.object(gate,'gjson')
+def check_two_identities_fail_closed(j,c):
+    m=MockG(two_identities=True); j.side_effect=m.json; c.side_effect=m.cmd
+    try: gate.preflight(); assert False
+    except gate.GateError as e:
+        assert 'V11_TEST_IDENTITY_AMBIGUOUS' in str(e)
+        assert m.sa in str(e)
+
+@patch.object(gate,'gcloud')
+@patch.object(gate,'gjson')
+def check_explicit_pinned_identity(j,c):
+    m=MockG(two_identities=True); j.side_effect=m.json; c.side_effect=m.cmd
+    assert gate.preflight(m.sa)['service_account']==m.sa
+
+@patch.object(gate,'gcloud')
+@patch.object(gate,'gjson')
+def check_unknown_identity_fails_closed(j,c):
+    m=MockG(two_identities=True); j.side_effect=m.json; c.side_effect=m.cmd
+    try: gate.preflight('bad@example.com'); assert False
+    except gate.GateError as e: assert 'EXPLICIT_V11_TEST_IDENTITY_NOT_FOUND' in str(e)
+
 for name in list(globals()):
     if name.startswith('check_'):
         ck(globals()[name])
-print('8/8 MOCK PASS')
+print('11/11 MOCK PASS')
