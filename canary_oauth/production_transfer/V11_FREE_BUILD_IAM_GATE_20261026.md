@@ -94,27 +94,27 @@ Production traffic preserved 100% and science jobs 0; synthetic V11 never certif
 - Free trial credit remaining: **approximately USD 198.88 / 300**
 - Trial end: **2026-12-17** (51 days remaining on October 27)
 - October billing report: **USD 33.62 usage; USD 33.62 savings; USD 0.00 payable**
-- Google Cloud project billing link: \`billingAccounts/01117F-2FB3E2-31D263\`
+- Google Cloud project billing link: `billingAccounts/01117F-2FB3E2-31D263`
 
-The previous \`FREE_TIER_NOT_VERIFIED\` blocker applies to an **Always Free, no trial-credit spending** policy. For the separately selected **NO-CARD-CHARGE** contract during active *unupgraded* Free Trial, trial-credit spending is admissible. **Do not claim zero resource consumption or permanent Always Free entitlement.**
+The previous `FREE_TIER_NOT_VERIFIED` blocker applies to an **Always Free, no trial-credit spending** policy. For the separately selected **NO-CARD-CHARGE** contract during active *unupgraded* Free Trial, trial-credit spending is admissible. **Do not claim zero resource consumption or permanent Always Free entitlement.**
 
-**Required gate**: \`TRIAL_ACCOUNT_UI_ATTESTED + LIVE_BILLING_LINK_MATCH + TRIAL_NOT_EXPIRED + CREDIT_AVAILABLE + PROJECT/IAM/ISOLATION_PASS\`.
+**Required gate**: `TRIAL_ACCOUNT_UI_ATTESTED + LIVE_BILLING_LINK_MATCH + TRIAL_NOT_EXPIRED + CREDIT_AVAILABLE + PROJECT/IAM/ISOLATION_PASS`.
 
-The Google Cloud Billing API \`billingEnabled=true\` **does not prove the account is still on Free Trial**. The console evidence is time-sensitive: if deployment is not done on 2026-10-27, obtain a fresh dated Free Trial screenshot. Any Paid upgrade, mismatch, inaccessible IAM, or inability to verify isolation => **STOP**.
+The Google Cloud Billing API `billingEnabled=true` **does not prove the account is still on Free Trial**. The console evidence is time-sensitive: if deployment is not done on 2026-10-27, obtain a fresh dated Free Trial screenshot. Any Paid upgrade, mismatch, inaccessible IAM, or inability to verify isolation => **STOP**.
 
 **Immutable approved test image**:
-\`ghcr.io/donaldshim/clab-oauth-v11-synthetic@sha256:a2e28d9c746073b9455c0a75e03bcf2892f3b0bf8339d5990759da27121b9d64\`
+`ghcr.io/donaldshim/clab-oauth-v11-synthetic@sha256:a2e28d9c746073b9455c0a75e03bcf2892f3b0bf8339d5990759da27121b9d64`
 
 **Deployment scope strictly limited**:
-- Project \`project-4e9f56f4-a524-4759-91f\`, region \`europe-west1\`.
-- Service \`c-lab-oauth-v11-test\` only, *not* \`c-lab-gcp-control\`.
+- Project `project-4e9f56f4-a524-4759-91f`, region `europe-west1`.
+- Service `c-lab-oauth-v11-test` only, *not* `c-lab-gcp-control`.
 - Test-dedicated service identity with **zero project-wide IAM roles**. Stop on absent/ambiguous identity, or if another service uses it.
-- Private invocation (\`--no-allow-unauthenticated\`), \`--no-traffic\`, isolated tagged revision, \`min-instances=0\`, \`max-instances=1\`, one CPU, 256 MiB, max concurrency 1, CPU throttled.
+- Private invocation (`--no-allow-unauthenticated`), `--no-traffic`, isolated tagged revision, `min-instances=0`, `max-instances=1`, one CPU, 256 MiB, max concurrency 1, CPU throttled.
 - No production OAuth changes, no C-Fabric permissions, no scientific jobs, no IAM grants, no billing upgrade.
 - Verify before/after production service revision, routing and invoker policy. On a deployment/postflight failure delete **only** the newly created test service and record the rollback; never delete or modify production.
 
-**Execution authority status**: A separate local preflight/deploy Python prototype was compiled and passed **8/8 isolated mock tests** on 2026-10-27, including fail-closed billing mismatch and private-service rollback tests. Its source SHA-256: \`e43b45e4923b488a79602f46dcb03144a1ecde8700cc241fef813c26a4436f5b\`. It must be transferred by an explicitly authorized source artifact to an authenticated Cloud Shell; the connected C-Lab GCP Control plugin has no general Cloud Run test-service deployment command, and the ChatGPT read-only browser cannot type into Cloud Shell.
+**Execution authority status**: A separate local preflight/deploy Python prototype was compiled and passed **8/8 isolated mock tests** on 2026-10-27, including fail-closed billing mismatch and private-service rollback tests. Its source SHA-256: `c4d7ac3e070ed6e615c2f348d43f8da5d470627d7a236d36ec09178a59153625`. It must be transferred by an explicitly authorized source artifact to an authenticated Cloud Shell; the connected C-Lab GCP Control plugin has no general Cloud Run test-service deployment command, and the ChatGPT read-only browser cannot type into Cloud Shell.
 
-**Current closure**: \`FREE_TRIAL_NO_CARD_CHARGE_ELIGIBILITY = AFFIRMED (dated UI evidence)\`; \`LIVE_IAM_PREFLIGHT = OPEN\`; \`PRIVATE_TEST_DEPLOYMENT = NOT_EXECUTED\`; \`NATIVE_GOOGLE_OAUTH_REFRESH = OPEN\`.
+**Current closure**: `FREE_TRIAL_NO_CARD_CHARGE_ELIGIBILITY = AFFIRMED (dated UI evidence)`; `LIVE_IAM_PREFLIGHT = OPEN`; `PRIVATE_TEST_DEPLOYMENT = NOT_EXECUTED`; `NATIVE_GOOGLE_OAUTH_REFRESH = OPEN`.
 
 Do not misrepresent this policy update as an actual deployed revision.
