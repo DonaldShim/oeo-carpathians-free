@@ -1,0 +1,30 @@
+{
+  "schema": "CLAB_OAUTH_GATEWAY_V1_PHYSICAL_RUN_STATE_20261028",
+  "phase": "PARTIAL_INFRASTRUCTURE_ADMISSION",
+  "built": "EXECUTABLE_SOURCE_PACKAGE_PLUS_READ_ONLY_GATE",
+  "local_test_result": "25/25_PASS",
+  "cloud_project": "project-4e9f56f4-a524-4759-91f",
+  "cloud_region": "europe-west1",
+  "runtime_service_account": "c-lab-oauth-gateway-v1@project-4e9f56f4-a524-4759-91f.iam.gserviceaccount.com",
+  "runtime_service_account_created": true,
+  "secret_manager_secrets_created": false,
+  "secret_version_attempt": "STOP_TOOL_SECURITY_BLOCKED; readback found no gateway secrets",
+  "cloud_sql_admin_api_enabled": false,
+  "dedicated_postgresql_verified": false,
+  "render_free_db_isolated_available": false,
+  "gateway_cloud_run_service_created": false,
+  "gateway_https_endpoint": null,
+  "google_web_oauth_client_secret_available": false,
+  "google_callback_registration_verified": false,
+  "google_offline_refresh_live": "OPEN",
+  "chatgpt_native_refresh_live": "OPEN",
+  "canonical_clab_production_changed": false,
+  "canonical_production_revision": "c-lab-gcp-control-custody-v1-prod-20261020",
+  "source_of_proof": "local pytest, RDC gcloud reads, Render Postgres workspace read; no live Google consent",
+  "stop_reasons": [
+    "NO_DEDICATED_BACKED_UP_POSTGRESQL",
+    "SECRET_MANAGER_VERSION_CREATION_NOT_AVAILABLE",
+    "NO_REGISTERED_GOOGLE_WEB_CLIENT_CALLBACK_AND_SECRET",
+    "CHATGPT_NATIVE_CONNECTION_NOT_AVAILABLE"
+  ]
+}

@@ -1,0 +1,9 @@
+FROM python@sha256:623674a14ef93d052bb9b0de4dbf5f28eb578a35263838941cc8aa43213c1487
+WORKDIR /srv
+ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
+COPY requirements.runtime.lock ./requirements.txt
+RUN pip install --no-cache-dir --require-hashes -r requirements.txt && useradd --uid 10001 --create-home gateway
+COPY gateway/ ./gateway/
+USER gateway
+EXPOSE 8080
+CMD ["sh", "-c", "exec uvicorn gateway.bootstrap:app --host 0.0.0.0 --port ${PORT:-8080} --no-access-log"]

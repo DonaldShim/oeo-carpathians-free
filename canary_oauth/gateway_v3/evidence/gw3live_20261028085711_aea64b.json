@@ -1,0 +1,30 @@
+{
+  "run_id": "gw3live_20261028085711_aea64b",
+  "utc": "2026-10-28T08:57:11.394577+00:00",
+  "provider": "REAL_FIRESTORE",
+  "google_provider": "SYNTHETIC_NOT_GOOGLE_OAUTH_PROOF",
+  "project": "project-4e9f56f4-a524-4759-91f",
+  "runtime_identity_proof": false,
+  "principal_class": "existing_gcloud_operator",
+  "concurrent_code_redemption": {
+    "attempts": 4,
+    "winners": 1,
+    "status": "AFFIRMED"
+  },
+  "concurrent_rotation_and_replay_revocation": {
+    "attempts": 4,
+    "winners": 1,
+    "revoked": true,
+    "status": "AFFIRMED"
+  },
+  "google_refresh_lease_real_firestore": {
+    "external_calls": 1,
+    "status": "AFFIRMED"
+  },
+  "independent_client_readback": "AFFIRMED",
+  "status": "AFFIRMED",
+  "disposable_cleanup": {
+    "deleted_new_test_documents": 15,
+    "status": "AFFIRMED"
+  }
+}

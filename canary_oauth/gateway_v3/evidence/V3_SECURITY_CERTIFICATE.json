@@ -1,0 +1,26 @@
+{
+  "utc": "2026-10-28T09:09:21.982446+00:00",
+  "status": "BECOMING",
+  "original_archive_sha256": "e6104d277691a01c1b59e744280b8b57137229ba532ea4e4269b49863ac4e957",
+  "original_v2_files_verified": 32,
+  "local_tests": 56,
+  "real_firestore": "AFFIRMED_OPERATOR_IDENTITY_ONLY",
+  "google_oauth": "OPEN",
+  "native_chatgpt_refresh": "OPEN",
+  "drive_live_backup": "OPEN",
+  "production_changed": false,
+  "new_scientific_jobs": 0,
+  "fixed_critical_defects": [
+    "unknown_google_refresh_blind_replay",
+    "expired_lease_replay",
+    "lease_finish_fencing",
+    "non_atomic_access_grant_check",
+    "duplicate_oauth_parameters",
+    "unsupported_client_auth",
+    "unbounded_socket_total_time",
+    "drive_metadata_echo_without_download",
+    "backup_token_resurrection"
+  ],
+  "test_evidence_sha256": "a4b5ec26ba76c2fec1b8f62104c22f1afe2687160438e5273d3a1ee9a7726695",
+  "live_firestore_certificate_sha256": "f28917d651e4e8adf3c41f294c4f09d3eaa597814ee0aefb35b5707656b588a5"
+}

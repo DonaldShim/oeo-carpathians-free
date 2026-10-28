@@ -1,0 +1,7 @@
+pytest==8.3.5
+SQLAlchemy==2.0.50
+greenlet==3.2.5
+psycopg==3.3.6
+psycopg-binary==3.3.6
+pluggy==1.7.0
+iniconfig==2.3.1

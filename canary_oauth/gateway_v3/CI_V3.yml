@@ -1,0 +1,69 @@
+name: C-Lab OAuth Gateway V3 isolated immutable image
+on:
+  push:
+    branches: [c-lab-oauth-gateway-v1-20261028]
+    paths: ['canary_oauth/gateway_v3/**', '.github/workflows/clab-oauth-gateway-v3.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+  id-token: write
+concurrency:
+  group: clab-gateway-v3-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  test-and-build:
+    if: github.ref == 'refs/heads/c-lab-oauth-gateway-v1-20261028'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Verify cumulative manifest and all tests
+        working-directory: canary_oauth/gateway_v3
+        run: |
+          set -euo pipefail
+          python verify_manifest.py
+          python -m pip install --require-hashes -r requirements.runtime.lock -r requirements.tests.lock
+          python -m pip check
+          python -m pytest -q --junitxml=/tmp/gateway-v3-tests.xml
+      - id: google
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: projects/855271818322/locations/global/workloadIdentityPools/c-lab-gateway-ci/providers/github-v3
+          service_account: c-lab-gateway-v3-builder@project-4e9f56f4-a524-4759-91f.iam.gserviceaccount.com
+          token_format: access_token
+          create_credentials_file: false
+          access_token_lifetime: 600s
+      - name: Build, startup-denial probe and publish pinned source
+        working-directory: canary_oauth/gateway_v3
+        env:
+          GOOGLE_ACCESS_TOKEN: ${{ steps.google.outputs.access_token }}
+          SOURCE_COMMIT: ${{ github.sha }}
+          IMAGE: europe-west1-docker.pkg.dev/project-4e9f56f4-a524-4759-91f/c-lab-release/c-lab-oauth-gateway-v3
+        run: |
+          set -euo pipefail
+          printf '%s' "$GOOGLE_ACCESS_TOKEN" | docker login -u oauth2accesstoken --password-stdin https://europe-west1-docker.pkg.dev >/dev/null
+          docker build --platform linux/amd64 -f Dockerfile.firestore --label org.opencontainers.image.revision="$SOURCE_COMMIT" -t "$IMAGE:sha-$SOURCE_COMMIT" .
+          cid=$(docker run -d -p 127.0.0.1:8088:8080 "$IMAGE:sha-$SOURCE_COMMIT")
+          trap 'docker rm -f "$cid" >/dev/null 2>&1 || true; docker logout https://europe-west1-docker.pkg.dev >/dev/null 2>&1 || true' EXIT
+          python - <<'PY'
+          import json,time,urllib.request,urllib.error
+          for i in range(30):
+              try:
+                  urllib.request.urlopen('http://127.0.0.1:8088/health',timeout=2)
+                  raise AssertionError('missing credentials falsely ready')
+              except urllib.error.HTTPError as e:
+                  assert e.code==503
+                  body=json.load(e);assert body['ready'] is False
+                  break
+              except urllib.error.URLError:
+                  time.sleep(.2)
+          else:raise AssertionError('container did not start')
+          PY
+          docker push "$IMAGE:sha-$SOURCE_COMMIT"
+          docker image inspect "$IMAGE:sha-$SOURCE_COMMIT" --format '{{json .RepoDigests}}'
+          echo 'No Cloud Run deployment is performed by this workflow.'
