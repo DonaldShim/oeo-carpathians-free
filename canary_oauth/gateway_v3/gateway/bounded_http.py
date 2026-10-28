@@ -40,6 +40,7 @@ def request(method, url, *, headers=None, data=None, json_body=None, timeout=20)
         import httpx
         import base64
         return httpx.Response(result['status'],headers=result['headers'],
-                              content=base64.b64decode(result['body'],validate=True))
+                              content=base64.b64decode(result['body'],validate=True),
+                              request=httpx.Request(method,url))
     except Exception:
         raise BoundedHTTPError('invalid provider response') from None

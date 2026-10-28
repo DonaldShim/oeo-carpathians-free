@@ -1,5 +1,6 @@
 from __future__ import annotations
 import httpx
+import json,time
 from fastapi import HTTPException
 from .config import Settings,GOOGLE_TOKEN_URL,GOOGLE_IDENTITY_ISSUERS
 from .bounded_http import request, BoundedHTTPError
@@ -14,6 +15,7 @@ class GoogleProvider:
             'client_secret':self.settings.google_client_secret,
             'redirect_uri':self.settings.google_callback,
             'code_verifier':verifier,'grant_type':'authorization_code'})
+            print(json.dumps({'event':'google_exchange_http','status':response.status_code,'epoch':int(time.time())}),flush=True)
             response.raise_for_status()
             result=response.json()
         except (httpx.HTTPError,ValueError,BoundedHTTPError):
@@ -47,6 +49,7 @@ class GoogleProvider:
             response=request('POST',GOOGLE_TOKEN_URL,data={'refresh_token':refresh_token,
                 'client_id':self.settings.google_client_id,'client_secret':self.settings.google_client_secret,
                 'grant_type':'refresh_token'})
+            print(json.dumps({'event':'google_refresh_http','status':response.status_code,'epoch':int(time.time())}),flush=True)
             response.raise_for_status()
             result=response.json()
         except (httpx.HTTPError,ValueError,BoundedHTTPError):

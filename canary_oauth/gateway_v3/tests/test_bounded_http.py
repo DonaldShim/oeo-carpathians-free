@@ -31,3 +31,21 @@ def test_subprocess_args_never_contain_bearer(monkeypatch):
     with pytest.raises(bounded_http.BoundedHTTPError):
         bounded_http.request('POST','https://oauth2.googleapis.com/token',headers={'Authorization':'Bearer synthetic-private-bearer'})
     assert 'synthetic-private-bearer' not in repr(observed)
+
+def test_real_parent_response_supports_google_status_validation(monkeypatch):
+    import base64,json
+    class Child:
+        returncode=0
+        def communicate(self,body,timeout):
+            return json.dumps({'status':200,'headers':{'content-type':'application/json'},
+                'body':base64.b64encode(b'{"access_token":"synthetic","refresh_token":"synthetic","id_token":"synthetic","expires_in":3600}').decode()}).encode(),None
+    monkeypatch.setattr(bounded_http.subprocess,'Popen',lambda *a,**k:Child())
+    response=bounded_http.request('POST','https://oauth2.googleapis.com/token')
+    response.raise_for_status()
+    assert response.json()['expires_in']==3600
+    from gateway.google import GoogleProvider
+    from types import SimpleNamespace
+    provider=GoogleProvider(SimpleNamespace(google_client_id='synthetic.apps.googleusercontent.com',
+        google_client_secret='SYNTHETIC_NOT_A_SECRET',google_callback='https://fixture.invalid/callback'))
+    assert provider.exchange('synthetic-code','synthetic-verifier')['expires_in']==3600
+    assert provider.refresh('synthetic-refresh')['expires_in']==3600

@@ -1,9 +1,9 @@
 {
-  "utc": "2026-10-28T10:02:50.019275+00:00",
+  "utc": "2026-10-28T10:38:23.678146+00:00",
   "status": "BECOMING",
   "original_archive_sha256": "e6104d277691a01c1b59e744280b8b57137229ba532ea4e4269b49863ac4e957",
   "original_v2_files_verified": 32,
-  "local_tests": 59,
+  "local_tests": 60,
   "real_firestore": "AFFIRMED_OPERATOR_IDENTITY_ONLY",
   "google_oauth": "OPEN_PERSONAL_CONSENT_NOT_YET_PERFORMED",
   "native_chatgpt_refresh": "OPEN",
@@ -22,14 +22,15 @@
     "backup_token_resurrection",
     "oauth_token_error_schema",
     "secret_bearing_request_url_logging",
-    "expiry_cleanup_admission"
+    "expiry_cleanup_admission",
+    "HTTP_RESPONSE_REQUEST_MISSING_GOOGLE_EXCHANGE_REFRESH_MAIN_PATH"
   ],
-  "test_evidence_sha256": "3dc9fe7a47d9627d3d256901704138a0170df3e99110878a07f5e9f2096e0a64",
+  "test_evidence_sha256": "34ad4739b555b7f28177cfd3eceae36fdbb7cb087b8fb2fcf8b9f53f15c67695",
   "live_firestore_certificate_sha256": "f28917d651e4e8adf3c41f294c4f09d3eaa597814ee0aefb35b5707656b588a5",
   "encrypted_drive_test_backup": "AFFIRMED_SYNTHETIC_DATA_CONNECTOR_CHANNEL",
   "runtime_drive_delegation": "OPEN",
   "retention": "AFFIRMED_REAL_FIRESTORE_OPPORTUNISTIC_NOT_IDLE_DELETION_SLA",
-  "source_predecessor_manifest_sha256": "12ca72e55e09a4d67606511bd4d162c2f265e193e315d2978d38fb75eadc39f5",
+  "source_predecessor_manifest_sha256": "1d5f95a239fcc7664fae740bca92958ef3362a23deae59184a3a20fc1bb00cb4",
   "real_retention_replay": {
     "utc": "2026-10-28T09:59:31.834601+00:00",
     "prefix": "gw3retain_20261028095931",
@@ -57,5 +58,10 @@
     "old_access_rejected": true,
     "independent_firestore_readback": true,
     "new_restore_probe_cleanup": "AFFIRMED"
+  },
+  "http_response_repair": {
+    "before": "REPRODUCED_RuntimeError_raise_for_status_request_missing",
+    "after": "GoogleProvider.exchange_and_refresh_real_parent_wrapper_PASS",
+    "live_oauth_claimed": false
   }
 }
