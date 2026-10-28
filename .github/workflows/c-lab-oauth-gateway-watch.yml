@@ -1,0 +1,33 @@
+name: C-Lab Gateway V3 public-health watch
+on:
+  schedule:
+    - cron: "8,25,42,59 * * * *"
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/c-lab-oauth-gateway-watch.yml"
+      - "ops/c_lab_gateway_watch.py"
+      - "tests/test_c_lab_gateway_watch.py"
+permissions:
+  contents: read
+  issues: write
+concurrency:
+  group: c-lab-gateway-public-watch
+  cancel-in-progress: false
+jobs:
+  watch:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout fixed source revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Self-tests (no OAuth access)
+        run: python3 -m unittest discover -s tests -p test_c_lab_gateway_watch.py -v
+      - name: Live public probe and bounded alert through GitHub Issues
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: python3 ops/c_lab_gateway_watch.py
