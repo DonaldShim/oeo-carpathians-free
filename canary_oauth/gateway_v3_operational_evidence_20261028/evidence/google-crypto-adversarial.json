@@ -1,0 +1,43 @@
+{
+  "utc": "2026-10-28T10:26:24.039352+00:00",
+  "status": "AFFIRMED_ISOLATED_CRYPTO_NEGATIVES",
+  "google_managed_signature_proof": false,
+  "real_google_token_issued": false,
+  "fixture_private_keys_persisted": false,
+  "valid_crypto_fixture_accepted": true,
+  "negative_cases": [
+    {
+      "name": "foreign_audience",
+      "status": "REJECTED_403"
+    },
+    {
+      "name": "expired",
+      "status": "REJECTED_403"
+    },
+    {
+      "name": "foreign_issuer",
+      "status": "REJECTED_403"
+    },
+    {
+      "name": "foreign_user",
+      "status": "REJECTED_403"
+    },
+    {
+      "name": "unverified_email",
+      "status": "REJECTED_403"
+    },
+    {
+      "name": "foreign_nonce",
+      "status": "REJECTED_403"
+    },
+    {
+      "name": "missing_subject",
+      "status": "REJECTED_403"
+    },
+    {
+      "name": "tampered_signature",
+      "status": "REJECTED_403"
+    }
+  ],
+  "source_google_py_sha256": "37653d170d891eb9fa6da93ec3fa77285092f24702ee20996f1906c77727da1f"
+}

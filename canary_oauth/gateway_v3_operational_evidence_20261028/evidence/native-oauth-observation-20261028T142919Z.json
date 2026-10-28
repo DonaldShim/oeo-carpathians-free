@@ -1,0 +1,77 @@
+{
+  "utc": "2026-10-28T14:29:19.113565+00:00",
+  "read_only_projection": true,
+  "credential_fields_read": false,
+  "clock_source": "LOCAL_OPERATOR_UTC_FOR_OBSERVATION_ONLY",
+  "grant_times_source": "CLOUD_RUN_HANDLER_EPOCH_FROM_FIRESTORE",
+  "gateway_access_ttl": 90,
+  "grants": [
+    {
+      "grant_fingerprint": "006c3bd1c5010f5245046285",
+      "metadata": {
+        "created_epoch": 1793197585,
+        "refresh_fence": 0,
+        "refresh_lease_until": 0,
+        "google_access_expires": 1793201184,
+        "expires": 1795789585,
+        "revoked": false,
+        "client_id": "https://chatgpt.com/oauth/client.json",
+        "refresh_status": "IDLE",
+        "resource": "https://c-lab-oauth-gateway-v3-855271818322.europe-west1.run.app/mcp"
+      },
+      "events": [
+        {
+          "epoch": 1793197585,
+          "kind": "google_offline_credential_issued"
+        },
+        {
+          "epoch": 1793197588,
+          "kind": "gateway_access_and_refresh_issued"
+        },
+        {
+          "epoch": 1793197589,
+          "kind": "gateway_refresh_success"
+        },
+        {
+          "epoch": 1793197594,
+          "kind": "gateway_refresh_success"
+        },
+        {
+          "epoch": 1793197663,
+          "kind": "gateway_refresh_success"
+        },
+        {
+          "epoch": 1793197758,
+          "kind": "gateway_refresh_success"
+        }
+      ],
+      "local_refresh_timing": [
+        {
+          "previous_issue_epoch": 1793197588,
+          "refresh_epoch": 1793197589,
+          "previous_expiry": 1793197678,
+          "post_expiry": false
+        },
+        {
+          "previous_issue_epoch": 1793197589,
+          "refresh_epoch": 1793197594,
+          "previous_expiry": 1793197679,
+          "post_expiry": false
+        },
+        {
+          "previous_issue_epoch": 1793197594,
+          "refresh_epoch": 1793197663,
+          "previous_expiry": 1793197684,
+          "post_expiry": false
+        },
+        {
+          "previous_issue_epoch": 1793197663,
+          "refresh_epoch": 1793197758,
+          "previous_expiry": 1793197753,
+          "post_expiry": true
+        }
+      ]
+    }
+  ],
+  "native_browser_proof_required_separately": true
+}

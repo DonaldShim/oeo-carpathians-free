@@ -1,0 +1,18 @@
+{
+  "utc": "2026-10-28T09:37:14.002265+00:00",
+  "dataset": "SYNTHETIC_REVOKED_GRANT_ONLY",
+  "drive_file_id": "[PRIVATE_DRIVE_ID_REDACTED]",
+  "folder_id": "[PRIVATE_DRIVE_ID_REDACTED]",
+  "independent_readback_channel": "OFFICIAL_DRIVE_BROWSER_DOWNLOAD",
+  "ciphertext_sha256": "70869bffa1158d0df9111a84467784e7db65598b657a2511337e5ce944ff6110",
+  "runtime_drive_delegation": "NOT_PROVEN_CONNECTOR_OPERATOR_BACKUP_ONLY",
+  "status": "AFFIRMED_TEST_DATA_BACKUP_AND_RESTORE",
+  "download_bytes": 696,
+  "authenticated_decryption": true,
+  "restored_grants": 1,
+  "all_grants_revoked": true,
+  "google_credentials_restored": false,
+  "old_access_rejected": true,
+  "independent_firestore_readback": true,
+  "new_restore_probe_cleanup": "AFFIRMED"
+}

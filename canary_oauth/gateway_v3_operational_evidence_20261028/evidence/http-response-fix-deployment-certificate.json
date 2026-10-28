@@ -1,0 +1,12 @@
+{
+  "utc": "2026-10-28T10:42:48.883935+00:00",
+  "status": "AFFIRMED_DEPLOYED_REPAIR",
+  "revision": "c-lab-oauth-gateway-v3-httpfix0574",
+  "image": "europe-west1-docker.pkg.dev/project-4e9f56f4-a524-4759-91f/c-lab-release/c-lab-oauth-gateway-v3@sha256:f88b6f09628d14efee1c6c7a0697c7db1785c47e41d73ba4990709a75d47204c",
+  "source_manifest_sha256": "0574b758040505496ebaa75b783ad49e455f84202eb602d1e4e80ea39d98721c",
+  "source_commit": "59a72290b6f61f1ae48cd4752f1e4f220a9b23c6",
+  "canary_zero_traffic_pass": true,
+  "canonical_production_unchanged": true,
+  "oauth_grant_not_replayed": true,
+  "google_oauth": "OPEN_NEW_USER_FLOW_REQUIRED_IF_PRIOR_CONSUMED"
+}

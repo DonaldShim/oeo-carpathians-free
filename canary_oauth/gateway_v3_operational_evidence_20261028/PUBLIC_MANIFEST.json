@@ -1,0 +1,18 @@
+{
+  "schema": "clab-public-evidence-1",
+  "files": {
+    "canary_oauth/gateway_v3_operational_evidence_20261028/GATEWAY_V3_LIVE_STATUS.md": "93f080e3bcc24fb67b2b87d8ce5b842d112f7645d7e6067bfd9ce0220423d133",
+    "canary_oauth/gateway_v3_operational_evidence_20261028/observe_native_oauth.py": "6e088ac1cbf8bf510cf0c4d4f598cd08750b64921efef191e9c59166fd7a2130",
+    "canary_oauth/gateway_v3_operational_evidence_20261028/collect_live_closure.py": "a42a5977cfc057afddcb1f56adca32c1b8046fc7a434ae75f463c895f35d2c4d",
+    "canary_oauth/gateway_v3_operational_evidence_20261028/verify_google_crypto_negatives.py": "f6cce5ab71bcba20410c30565592d609bab7b17b78379a6dd25db77a5b405fc8",
+    "canary_oauth/gateway_v3_operational_evidence_20261028/verify_drive_restore.py": "b3e4c90c8e7912f3938bc127fb5471cc0a119ae0b00dff13be32db0c24ad596c",
+    "canary_oauth/gateway_v3_operational_evidence_20261028/live_firestore_replay.py": "60421a9eea49bf67614a81f510fe6ce4185a6e6267177674ac6b57a444251f67",
+    "canary_oauth/gateway_v3_operational_evidence_20261028/live_retention_replay.py": "2c34aec142e3b42df5beab3edb06ee91754a0d98ab1f97aafc55da6ee1281070",
+    "canary_oauth/gateway_v3_operational_evidence_20261028/evidence/NATIVE_CHATGPT_POST_EXPIRY_CERTIFICATE.json": "897e616d356fd7c2a2ac77376132201930bad209c2580e39b5348e30537ae630",
+    "canary_oauth/gateway_v3_operational_evidence_20261028/evidence/native-oauth-observation-20261028T142919Z.json": "24cc0c1bd405eaef66b15cba66142fa41b90408d4d2e88f19564ced5d2226448",
+    "canary_oauth/gateway_v3_operational_evidence_20261028/evidence/http-response-fix-deployment-certificate.json": "3db325d94ff28f6926e210f373c93fad3cac7a886f9bd74e8b670037a6a30121",
+    "canary_oauth/gateway_v3_operational_evidence_20261028/evidence/google-crypto-adversarial.json": "0658dc413d007dba13817a2368d68c67d4fdf6bd50f44ad0d3440a2239c44c4f",
+    "canary_oauth/gateway_v3_operational_evidence_20261028/evidence/drive-live-restore-certificate.json": "68888da9ac4f1320e84d1854a0436909fbe0dbdffd27a55ece84d3eafdc67255",
+    "canary_oauth/gateway_v3_operational_evidence_20261028/evidence/v3-security-tests-http-response-repair.xml": "34ad4739b555b7f28177cfd3eceae36fdbb7cb087b8fb2fcf8b9f53f15c67695"
+  }
+}
