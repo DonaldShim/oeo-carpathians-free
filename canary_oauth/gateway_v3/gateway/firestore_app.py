@@ -10,6 +10,7 @@ from typing import Any
 from urllib.parse import urlencode
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse, RedirectResponse, Response
+from fastapi.exception_handlers import http_exception_handler
 from .config import Settings, GOOGLE_AUTH_URL, READ_TOOLS
 from .crypto import Cipher, digest, random_token, challenge_from_verifier, valid_verifier
 from .google import GoogleProvider
@@ -30,41 +31,58 @@ def create_app(settings: Settings, store=None, provider=None, upstream=None) -> 
     def now():return int(time.time())
     def fail(status=400, detail='invalid_request'):raise HTTPException(status_code=status,detail=detail)
     def tokens(access, refresh):
+        try:store.maintain(now())
+        except Exception:
+            print(json.dumps({'event':'retention_deferred','epoch':now()}),flush=True)
         return JSONResponse({'access_token':access,'refresh_token':refresh,'token_type':'Bearer',
                              'expires_in':settings.access_lifetime_seconds,'scope':'clab.read'},
                             headers={'Cache-Control':'no-store','Pragma':'no-cache'})
+
+    @app.exception_handler(HTTPException)
+    async def oauth_error(request:Request,exc:HTTPException):
+        if request.url.path in ('/token','/revoke'):
+            admitted={'invalid_request','invalid_client','invalid_grant','unsupported_grant_type','invalid_scope'}
+            error=exc.detail if exc.detail in admitted else 'invalid_request'
+            return JSONResponse({'error':error},status_code=exc.status_code,headers={'Cache-Control':'no-store'})
+        return await http_exception_handler(request,exc)
+
+    def finish(request,response):
+        response.headers['Cache-Control']='no-store'
+        response.headers['X-Content-Type-Options']='nosniff'
+        response.headers['Referrer-Policy']='no-referrer'
+        response.headers['X-Frame-Options']='DENY'
+        if request.url.path in ('/authorize','/google/callback','/token','/revoke','/mcp'):
+            # Do not print query, headers, body, token, code, state, or exception.
+            print(json.dumps({'event':'oauth_http','path':request.url.path,'status':response.status_code,'epoch':now()}),flush=True)
+        return response
 
     @app.middleware('http')
     async def private(request:Request,call_next):
         if request.url.path in ('/authorize','/google/callback'):
             keys=list(request.query_params.keys())
             if any(len(request.query_params.getlist(k))!=1 for k in keys):
-                return JSONResponse({'error':'duplicate_parameter'},status_code=400)
+                return finish(request,JSONResponse({'error':'duplicate_parameter'},status_code=400))
         if request.url.path in ('/token','/revoke'):
             raw=await request.body()
-            if len(raw)>8192:return JSONResponse({'error':'request_too_large'},status_code=413)
+            if len(raw)>8192:return finish(request,JSONResponse({'error':'request_too_large'},status_code=413))
             if request.headers.get('authorization'):
-                return JSONResponse({'error':'unsupported_client_authentication'},status_code=400)
+                return finish(request,JSONResponse({'error':'unsupported_client_authentication'},status_code=400))
         try:
             response=await call_next(request)
         except Exception:
-            return JSONResponse({'error':'dependency_unavailable'},status_code=503,
+            response=JSONResponse({'error':'temporarily_unavailable'},status_code=503,
                                 headers={'Cache-Control':'no-store'})
-        response.headers['Cache-Control']='no-store'
-        response.headers['X-Content-Type-Options']='nosniff'
-        response.headers['Referrer-Policy']='no-referrer'
-        response.headers['X-Frame-Options']='DENY'
-        return response
+        return finish(request,response)
 
     @app.get('/health')
     def health():
         ready=False
         try:ready=store.health()
         except Exception:pass
-        return {'component':'c-lab-oauth-gateway-firestore','ready':ready,
+        return JSONResponse({'component':'c-lab-oauth-gateway-firestore','ready':ready,
                 'mode':'read-only','resource':settings.resource,
                 'google_oauth_configured':bool(settings.google_client_id and settings.google_client_secret),
-                'google_authorization_verified':False}
+                'google_authorization_verified':False},status_code=200 if ready else 503)
 
     @app.get('/.well-known/oauth-protected-resource')
     def protected_resource():
@@ -101,6 +119,9 @@ def create_app(settings: Settings, store=None, provider=None, upstream=None) -> 
             store.create_flow(digest(g_state),cipher.encrypt(json.dumps(payload)),epoch+600,epoch)
         except GrantFailure:
             fail(429,'authorization admission denied')
+        try:store.maintain(epoch)
+        except Exception:
+            print(json.dumps({'event':'retention_deferred','epoch':epoch}),flush=True)
         params={'response_type':'code','client_id':settings.google_client_id,
                 'redirect_uri':settings.google_callback,'scope':'openid email profile',
                 'state':g_state,'access_type':'offline',

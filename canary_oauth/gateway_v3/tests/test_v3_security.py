@@ -113,3 +113,32 @@ def test_google_audience_issuer_nonce_subject_and_owner(client,monkeypatch):
         with pytest.raises(HTTPException):GoogleProvider(s).verify('synthetic-jwt','nonce')
     claims=valid
     assert GoogleProvider(s).verify('synthetic-jwt','nonce')['sub']=='owner-sub'
+
+def test_oauth_token_error_schema(client):
+    c,s,st,g,u=client
+    r=c.post('/token',data={'client_id':CIMD,'resource':s.resource,'grant_type':'refresh_token','refresh_token':'synthetic-missing'})
+    assert r.status_code==400 and r.json()=={'error':'invalid_grant'}
+
+def test_audit_never_logs_bearer_or_body(client,capsys):
+    c,s,st,g,u=client
+    token,_=get_tokens(client)
+    c.post('/mcp',headers={'Authorization':'Bearer '+token['access_token']},
+           json={'jsonrpc':'2.0','id':1,'method':'tools/list'})
+    log=capsys.readouterr().out
+    assert 'oauth_http' in log
+    assert token['access_token'] not in log and token['refresh_token'] not in log
+    assert 'google-code' not in log and 'google-refresh' not in log
+
+def test_cleanup_admission_single_winner_and_bound(store):
+    # No expired test docs: only the shared maintenance admission is exercised.
+    class Empty:
+        def where(self,**kwargs):return self
+        def limit(self,n):assert n==12;return self
+        def stream(self,**kwargs):return []
+    original=store.client.collection
+    store.client.collection=lambda name:original(name) if name.endswith('_meta') else Empty()
+    assert store.maintain(1000)==0
+    assert store.maintain(1001)==0
+    gate=store._doc('meta','retention').get().to_dict()
+    assert gate['next']==1600
+    with pytest.raises(ValueError):store.maintain(2000,limit=13)

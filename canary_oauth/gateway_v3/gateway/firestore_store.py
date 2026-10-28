@@ -38,7 +38,36 @@ class FirestoreOAuthStore:
 
     @staticmethod
     def _audit(tx, doc, t, kind, grant_id=''):
-        tx.create(doc, {'epoch':t,'kind':kind,'grant_id':grant_id})
+        tx.create(doc, {'epoch':t,'kind':kind,'grant_id':grant_id,'expires':t+90*86400})
+
+    def maintain(self,t:int,limit:int=12):
+        """Bounded opportunistic expiry cleanup; no paid TTL scheduler required.
+
+        One lease per ten minutes, at most 84 already-expired records per run.
+        Update-time preconditions prevent deleting a concurrently changed record.
+        Errors only defer maintenance, never change authorization decisions.
+        """
+        if not 1<=limit<=12:raise ValueError('cleanup limit outside bound')
+        gate=self._doc('meta','retention')
+        def claim(tx):
+            snap=gate.get(transaction=tx)
+            if snap.exists and snap.to_dict().get('next',0)>t:return False
+            value={'next':t+600}
+            if snap.exists:tx.update(gate,value)
+            else:tx.create(gate,value)
+            return True
+        if not self._tx(claim):return 0
+        from google.cloud.firestore_v1.base_query import FieldFilter
+        deleted=0
+        for kind in ('flows','codes','access','refresh','grants','rate','audit'):
+            docs=list(self.client.collection(self.prefix+'_'+kind).where(filter=FieldFilter('expires','<=',t)).limit(limit).stream(timeout=5,retry=None))
+            if not docs:continue
+            batch=self.client.batch()
+            for doc in docs:
+                batch.delete(doc.reference,option=self.client.write_option(last_update_time=doc.update_time))
+            batch.commit(timeout=10,retry=None)
+            deleted+=len(docs)
+        return deleted
 
     def health(self):
         # Read metadata only; no implicit schema migration or secrets.

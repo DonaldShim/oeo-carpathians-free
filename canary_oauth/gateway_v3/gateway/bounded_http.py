@@ -27,8 +27,10 @@ def request(method, url, *, headers=None, data=None, json_body=None, timeout=20)
         raw,_=p.communicate(payload,timeout=max(.001,timeout-(time.monotonic()-started)))
     except (subprocess.TimeoutExpired,BaseException):
         if p.poll() is None:
-            if os.name!='nt':os.killpg(p.pid,signal.SIGKILL)
-            else:p.kill()
+            try:
+                if os.name!='nt':os.killpg(p.pid,signal.SIGKILL)
+                else:p.kill()
+            except ProcessLookupError:pass
         p.communicate(timeout=2)
         raise BoundedHTTPError('provider request terminated') from None
     if p.returncode or len(raw)>400000:

@@ -1,11 +1,11 @@
 {
-  "utc": "2026-10-28T09:09:21.982446+00:00",
+  "utc": "2026-10-28T10:02:50.019275+00:00",
   "status": "BECOMING",
   "original_archive_sha256": "e6104d277691a01c1b59e744280b8b57137229ba532ea4e4269b49863ac4e957",
   "original_v2_files_verified": 32,
-  "local_tests": 56,
+  "local_tests": 59,
   "real_firestore": "AFFIRMED_OPERATOR_IDENTITY_ONLY",
-  "google_oauth": "OPEN",
+  "google_oauth": "OPEN_PERSONAL_CONSENT_NOT_YET_PERFORMED",
   "native_chatgpt_refresh": "OPEN",
   "drive_live_backup": "OPEN",
   "production_changed": false,
@@ -19,8 +19,43 @@
     "unsupported_client_auth",
     "unbounded_socket_total_time",
     "drive_metadata_echo_without_download",
-    "backup_token_resurrection"
+    "backup_token_resurrection",
+    "oauth_token_error_schema",
+    "secret_bearing_request_url_logging",
+    "expiry_cleanup_admission"
   ],
-  "test_evidence_sha256": "a4b5ec26ba76c2fec1b8f62104c22f1afe2687160438e5273d3a1ee9a7726695",
-  "live_firestore_certificate_sha256": "f28917d651e4e8adf3c41f294c4f09d3eaa597814ee0aefb35b5707656b588a5"
+  "test_evidence_sha256": "3dc9fe7a47d9627d3d256901704138a0170df3e99110878a07f5e9f2096e0a64",
+  "live_firestore_certificate_sha256": "f28917d651e4e8adf3c41f294c4f09d3eaa597814ee0aefb35b5707656b588a5",
+  "encrypted_drive_test_backup": "AFFIRMED_SYNTHETIC_DATA_CONNECTOR_CHANNEL",
+  "runtime_drive_delegation": "OPEN",
+  "retention": "AFFIRMED_REAL_FIRESTORE_OPPORTUNISTIC_NOT_IDLE_DELETION_SLA",
+  "source_predecessor_manifest_sha256": "12ca72e55e09a4d67606511bd4d162c2f265e193e315d2978d38fb75eadc39f5",
+  "real_retention_replay": {
+    "utc": "2026-10-28T09:59:31.834601+00:00",
+    "prefix": "gw3retain_20261028095931",
+    "provider": "REAL_FIRESTORE_OPERATOR_IDENTITY",
+    "status": "AFFIRMED",
+    "expired_deleted": 1,
+    "unexpired_preserved": true,
+    "maintenance_lease_enforced": true,
+    "new_test_cleanup": "AFFIRMED"
+  },
+  "drive_test_data_restore": {
+    "utc": "2026-10-28T09:37:14.002265+00:00",
+    "dataset": "SYNTHETIC_REVOKED_GRANT_ONLY",
+    "drive_file_id": "[REDACTED_PRIVATE_DRIVE_ID]",
+    "folder_id": "[REDACTED_PRIVATE_DRIVE_ID]",
+    "independent_readback_channel": "OFFICIAL_DRIVE_BROWSER_DOWNLOAD",
+    "ciphertext_sha256": "70869bffa1158d0df9111a84467784e7db65598b657a2511337e5ce944ff6110",
+    "runtime_drive_delegation": "NOT_PROVEN_CONNECTOR_OPERATOR_BACKUP_ONLY",
+    "status": "AFFIRMED_TEST_DATA_BACKUP_AND_RESTORE",
+    "download_bytes": 696,
+    "authenticated_decryption": true,
+    "restored_grants": 1,
+    "all_grants_revoked": true,
+    "google_credentials_restored": false,
+    "old_access_rejected": true,
+    "independent_firestore_readback": true,
+    "new_restore_probe_cleanup": "AFFIRMED"
+  }
 }

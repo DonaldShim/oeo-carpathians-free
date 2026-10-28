@@ -51,3 +51,21 @@ not asserted as complete merely from expiry checks.
 
 Do not replay an UNKNOWN Google refresh outcome. Reconsent is required.
 Do not route production traffic or claim FULL_CERTIFIED from these local results.
+
+## Subsequent live-gate repairs
+
+59 local tests pass. OAuth token errors now use the RFC error field; all OAuth
+HTTP audit is structured and excludes query/body/headers. Managed callback URL
+logs are excluded only for this Gateway while sanitized audit remains.
+Expiry cleanup uses one ten-minute Firestore admission and update-time CAS,
+at most 84 expired docs per run; real Firestore verified expired deletion and
+unexpired preservation. It runs on authorization/token activity, so no
+physical idle-deletion SLA is asserted.
+
+The owner separately approved adding the Gateway callback and an additional
+client secret to the existing Google client. The previous redirect/secret
+remain. New secret was transferred directly between official Google forms
+to Secret Manager, without a plaintext file. Personal Google consent and both
+post-expiry replays remain OPEN. Actual encrypted Drive test-data backup and
+revoked-only restore succeeded using the existing Drive connector; this does
+not establish delegated Drive credentials inside Cloud Run.
