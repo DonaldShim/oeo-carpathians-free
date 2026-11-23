@@ -15,6 +15,29 @@ INPUT={"type":"object","properties":{},"additionalProperties":False}
 
 def install(s):
     app=s.app
+    @app.on_event("startup")
+    async def verify_fixed_frozen_case_backing():
+        # Fixed safe case: one bounded SELECT against the dedicated reader role.
+        # No arbitrary case input, no token, no new job, and no output payload.
+        if os.environ.get("CLAB_FROZEN_ARCHIVE_STARTUP_PROBE")!="1":
+            return
+        try:
+            ok,data=await asyncio.to_thread(frozen.query,"get_frozen_case_state",
+                        {"case_ref":"ARC3-ACTION-BASIS-CAUSAL-PROBE-V1"})
+            records=data.get("records",[]) if isinstance(data,dict) else []
+            certified=bool(ok and len(records)==1 and
+                records[0].get("artifact_sha256")==
+                "469b992c1a9a1927d3fb73edffafa7e5495eb2fc97a84c67d5235e1846297965" and
+                records[0].get("has_scientific_manifest") is True)
+            print(json.dumps({"event":"CLAB_FROZEN_CASE_NEON_CANARY",
+                              "status":"PASS" if certified else "FAIL",
+                              "observed_records":len(records),
+                              "read_only":True,"scientific_jobs_executed":False}),
+                  flush=True)
+        except Exception:
+            print(json.dumps({"event":"CLAB_FROZEN_CASE_NEON_CANARY",
+                              "status":"FAIL","error_class":"READBACK_UNAVAILABLE",
+                              "scientific_jobs_executed":False}),flush=True)
     def rpc(id, result):
         return {"jsonrpc":"2.0","id":id,"result":result}
     def err(id,code,name):
