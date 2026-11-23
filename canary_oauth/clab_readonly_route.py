@@ -44,7 +44,7 @@ def install(s):
                     s.trace(db,"access_validated",family.id,tok.hashed,tok.expires,"bearer")
                 return valid
         except Exception:
-            return False
+            return None  # auth backend fault, NOT an invitation to reauthenticate
     async def upstream(id,name):
         key=os.environ.get("CLAB_READONLY_PROXY_TOKEN","")
         if len(key)<48 or len(key)>512 or key!=key.strip():
@@ -123,6 +123,7 @@ def install(s):
         if name not in OPS:return err(mid,-32601,"TOOL_NOT_ALLOWED")
         if params.get("arguments",{}) not in ({},None):
             return err(mid,-32602,"NO_ARGUMENTS_ALLOWED")
-        if not authorized(request.headers.get("authorization","")):
-            return auth_required(mid)
+        decision=authorized(request.headers.get("authorization",""))
+        if decision is None:return unavailable(mid,name,"UNAVAILABLE_AUTH_STORAGE")
+        if decision is False:return auth_required(mid)
         return await upstream(mid,name)
