@@ -111,6 +111,18 @@ app=FastAPI(title='C-Lab OAuth Canary',docs_url=None,redoc_url=None,openapi_url=
 
 @app.on_event('startup')
 def prepare():
+    # Neon: least-privileged read/write role has no DDL permission.
+    # All OAuth tables were preprovisioned by an independent schema migration.
+    if os.environ.get('CLAB_OAUTH_PREPROVISIONED')=='1':
+        if dbengine is None:raise RuntimeError('NEON_DATABASE_URL_MISSING')
+        tables=('canary_auth_intent','canary_auth_code','canary_family',
+                'canary_token','canary_refresh_recovery','canary_fault_once_v8',
+                'canary_oauth_trace_v8','canary_event','canary_rate_limit')
+        with dbengine.connect() as connection:
+            for table in tables:
+                if connection.execute(text('SELECT to_regclass(:t)'),{'t':'public.'+table}).scalar() is None:
+                    raise RuntimeError('NEON_SCHEMA_MISSING')
+        return
     if dbengine is not None:
         Base.metadata.create_all(dbengine)
     if os.environ.get('CANARY_V6_STARTUP_PG_AUDIT')=='1':
