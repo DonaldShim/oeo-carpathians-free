@@ -172,24 +172,24 @@ def metadata():
       'authorization_response_iss_parameter_supported':True,
       'client_id_metadata_document_supported':True,
       'token_endpoint_auth_methods_supported':['none'],
-      'scopes_supported':['c_lab_canary.read','offline_access']}
+      'scopes_supported':['c_lab_canary.read','c_lab_control.read','offline_access']}
 @app.get('/.well-known/oauth-protected-resource')
 @app.get('/.well-known/oauth-protected-resource/mcp')
 def resource_metadata():
     return {'resource':ISSUER+'/mcp','authorization_servers':[ISSUER or 'https://disabled.invalid'],
-            'scopes_supported':['c_lab_canary.read','offline_access']}
+            'scopes_supported':['c_lab_canary.read','c_lab_control.read','offline_access']}
 @app.get('/authorize')
 def authorize(request:Request):
     if not READY:return error(503,'canary_not_configured')
     q=request.query_params
     if any(len(q.getlist(k))!=1 for k in q):return error(400,'invalid_request')
     scopes=q.get('scope','').split()
-    if not scopes or len(scopes)!=len(set(scopes)) or set(scopes)-{'c_lab_canary.read','offline_access'}:return error(400,'invalid_scope')
+    if not scopes or len(scopes)!=len(set(scopes)) or set(scopes)-{'c_lab_canary.read','c_lab_control.read','offline_access'}:return error(400,'invalid_scope')
     challenge=q.get('code_challenge','')
     if (q.get('client_id') not in CLIENTS or q.get('redirect_uri')!=CLIENTS.get(q.get('client_id')) or
         q.get('resource')!=ISSUER+'/mcp' or q.get('response_type')!='code' or
         q.get('code_challenge_method')!='S256' or re.fullmatch(r'[A-Za-z0-9_-]{43}',challenge) is None or
-        'c_lab_canary.read' not in q.get('scope','').split() or
+        not ({'c_lab_canary.read','c_lab_control.read'} & set(q.get('scope','').split())) or
         not q.get('state') or len(q['state'])>512):
         return error(400,'invalid_request')
     if q['client_id']==OPENAI_CIMD:
@@ -361,7 +361,7 @@ async def token(request:Request):
             return JSONResponse({'error':'temporarily_unavailable','error_description':'Controlled one-time canary response loss after durable rotation'},status_code=503,headers={'Retry-After':'1','Cache-Control':'no-store'})
         return JSONResponse(result,headers={'Cache-Control':'no-store','Pragma':'no-cache'})
     return error(400,'unsupported_grant_type')
-@app.post('/mcp')
+@app.post('/mcp-canary')
 async def mcp(request:Request):
     if not READY:return error(503,'canary_not_configured')
     try:req=await request.json()
@@ -439,3 +439,6 @@ install_audit(_sys.modules[__name__])
 
 from .security_middleware import install as install_security
 install_security(_sys.modules[__name__])
+# Additive pinned read-only OAuth MCP; old synthetic path kept on /mcp-canary.
+from .clab_readonly_route import install as install_clab_readonly
+install_clab_readonly(__import__(__name__,fromlist=['app']))
