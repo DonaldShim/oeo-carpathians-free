@@ -1,14 +1,16 @@
 """Scope-bound C-Lab read-only MCP bridge to existing Render V2.2.
 No arbitrary upstream URLs, methods, parameters or scientific execution.
 """
-import os,json,hmac
+import os,json,hmac,asyncio
 import httpx
 from fastapi import Request,Response
+from . import clab_frozen_case_tools as frozen
 
 READ_SCOPE="c_lab_control.read"
 UPSTREAM="https://c-lab-archive-only-free-20261123.onrender.com/mcp"
-OPS=("get_control_health","get_controller_status","get_fabric_health",
+LIVE_OPS=("get_control_health","get_controller_status","get_fabric_health",
      "get_snapshot_provenance","get_guest_health")
+OPS=LIVE_OPS+frozen.OPS
 INPUT={"type":"object","properties":{},"additionalProperties":False}
 
 def install(s):
@@ -110,8 +112,9 @@ def install(s):
         if method=="tools/list":
             return rpc(mid,{"tools":[{
                 "name":name,
-                "description":"Authenticated C-Lab V2.2 snapshot; NOT an execution tool.",
-                "inputSchema":INPUT,
+                "description":frozen.DESCRIPTIONS[name] if name in frozen.OPS else
+                    "Authenticated C-Lab V2.3 snapshot; NOT an execution tool.",
+                "inputSchema":frozen.INPUTS[name] if name in frozen.OPS else INPUT,
                 "securitySchemes":[{"type":"oauth2","scopes":[READ_SCOPE]}],
                 "annotations":{"readOnlyHint":True,"destructiveHint":False,
                                "idempotentHint":True,"openWorldHint":False}
@@ -121,9 +124,17 @@ def install(s):
         if not isinstance(params,dict):return err(mid,-32602,"INVALID_PARAMS")
         name=params.get("name")
         if name not in OPS:return err(mid,-32601,"TOOL_NOT_ALLOWED")
-        if params.get("arguments",{}) not in ({},None):
+        arguments=params.get("arguments",{})
+        if name in frozen.OPS:
+            if not frozen.args_ok(name,arguments):
+                return err(mid,-32602,"INVALID_ARCHIVE_ARGUMENTS")
+        elif arguments not in ({},None):
             return err(mid,-32602,"NO_ARGUMENTS_ALLOWED")
         decision=authorized(request.headers.get("authorization",""))
         if decision is None:return unavailable(mid,name,"UNAVAILABLE_AUTH_STORAGE")
         if decision is False:return auth_required(mid)
+        if name in frozen.OPS:
+            ok,result=await asyncio.to_thread(frozen.query,name,arguments)
+            return rpc(mid,{"content":[{"type":"text","text":json.dumps(result,ensure_ascii=False,sort_keys=True)}],
+                           "isError":not ok})
         return await upstream(mid,name)
